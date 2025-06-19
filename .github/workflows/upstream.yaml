@@ -1,0 +1,79 @@
+name: Sync KWRT Packages
+
+on:
+  # Jalankan setiap hari pada jam 02:00 UTC
+  schedule:
+    - cron: '0 2 * * *'
+
+  workflow_dispatch:
+
+jobs:
+  sync-packages:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Create packages directory
+      run: mkdir -p packages
+    
+    - name: Download KWRT packages
+      run: |
+        echo "Downloading kwrt-packages..."
+        wget -O kwrt-packages.zip https://github.com/kiddin9/kwrt-packages/archive/refs/heads/main.zip
+        
+    - name: Extract and move files
+      run: |
+        echo "Extracting archive..."
+        unzip -q kwrt-packages.zip
+        
+        echo "Moving files to packages directory..."
+        # Hapus semua isi folder packages kecuali .gitkeep jika ada
+        find packages -mindepth 1 -name '.gitkeep' -prune -o -type f -delete
+        find packages -mindepth 1 -name '.gitkeep' -prune -o -type d -exec rm -rf {} +
+        
+        # Pindahkan semua file kecuali .github dan README.md
+        cd kwrt-packages-main
+        find . -maxdepth 1 -type f -not -name 'README.md' -exec mv {} ../packages/ \;
+        find . -maxdepth 1 -type d -not -name '.' -not -name '.github' -exec mv {} ../packages/ \;
+        cd ..
+        
+        echo "Cleaning up temporary files..."
+        rm -rf kwrt-packages.zip kwrt-packages-main
+    
+    - name: Check for changes
+      id: check_changes
+      run: |
+        if [[ -n $(git status --porcelain) ]]; then
+          echo "changes=true" >> $GITHUB_OUTPUT
+          echo "Changes detected in packages directory"
+        else
+          echo "changes=false" >> $GITHUB_OUTPUT
+          echo "No changes detected"
+        fi
+    
+    - name: Commit and push changes
+      if: steps.check_changes.outputs.changes == 'true'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        git add packages/
+        git commit -m "Auto-sync: Update KWRT packages from upstream $(date +'%Y-%m-%d %H:%M:%S')"
+        git push
+    
+    - name: Create summary
+      run: |
+        echo "## KWRT Packages Sync Summary" >> $GITHUB_STEP_SUMMARY
+        echo "- **Date**: $(date)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Source**: https://github.com/kiddin9/kwrt-packages" >> $GITHUB_STEP_SUMMARY
+        
+        if [[ "${{ steps.check_changes.outputs.changes }}" == "true" ]]; then
+          echo "- **Status**: ✅ Changes detected and committed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Files updated**: $(git diff --name-only HEAD~1 HEAD | wc -l) files" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- **Status**: ℹ️ No changes detected" >> $GITHUB_STEP_SUMMARY
+        fi
