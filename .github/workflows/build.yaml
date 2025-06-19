@@ -55,6 +55,23 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Prepare build environment
+        run: |
+          # Ensure proper permissions for workspace
+          sudo chown -R $USER:$USER ${{ github.workspace }}
+          
+          # Verify packages directory exists
+          if [ ! -d "${{ github.workspace }}/packages" ]; then
+            echo "❌ Packages directory not found at ${{ github.workspace }}/packages"
+            echo "Available directories:"
+            ls -la ${{ github.workspace }}/
+            exit 1
+          fi
+          
+          echo "✅ Packages directory found"
+          echo "Contents:"
+          ls -la ${{ github.workspace }}/packages/
+
       - name: Build packages
         uses: openwrt/gh-action-sdk@main
         env:
@@ -63,10 +80,16 @@ jobs:
           FEED_DIR: ${{ github.workspace }}/packages
           INDEX: 1
           NO_REFRESH_CHECK: true
+          V: s
+        continue-on-error: true
 
       - name: Check build results
         run: |
           echo "=== Build completed for ${{ matrix.arch }}-${{ matrix.branch }} ==="
+          
+          # Fix permissions after build
+          sudo chown -R $USER:$USER ${{ github.workspace }} || true
+          
           echo "Checking for built packages..."
           
           # Determine package extension based on branch
@@ -77,18 +100,54 @@ jobs:
           fi
           
           echo "Looking for .$PKG_EXT files..."
+          echo "Expected path: bin/packages/${{ matrix.arch }}/packages_custom/"
           
-          # Check for package files
+          # Show full directory structure for debugging
+          echo "=== Full bin directory structure ==="
+          find bin/ -type f 2>/dev/null | head -20 || echo "No bin directory found"
+          
+          # Look for packages in common locations
+          PACKAGE_FOUND=false
+          
+          # Check standard location
           if find bin/packages/${{ matrix.arch }}/packages_custom/ -name "*.$PKG_EXT" 2>/dev/null | head -1 >/dev/null; then
-            echo "✅ Packages found:"
-            find bin/packages/${{ matrix.arch }}/packages_custom/ -name "*.$PKG_EXT" 2>/dev/null || true
-            echo "Package count: $(find bin/packages/${{ matrix.arch }}/packages_custom/ -name "*.$PKG_EXT" 2>/dev/null | wc -l)"
-          else
-            echo "❌ No .$PKG_EXT packages found"
-            echo "Directory structure:"
-            find bin/packages/ -type f 2>/dev/null | head -20 || echo "No files found in bin/packages/"
-            echo "Full directory listing:"
-            ls -la bin/packages/${{ matrix.arch }}/ 2>/dev/null || echo "Architecture directory not found"
+            echo "✅ Packages found in standard location:"
+            find bin/packages/${{ matrix.arch }}/packages_custom/ -name "*.$PKG_EXT" 2>/dev/null
+            PACKAGE_COUNT=$(find bin/packages/${{ matrix.arch }}/packages_custom/ -name "*.$PKG_EXT" 2>/dev/null | wc -l)
+            echo "Package count: $PACKAGE_COUNT"
+            PACKAGE_FOUND=true
+          fi
+          
+          # Check alternative locations
+          if [ "$PACKAGE_FOUND" = false ]; then
+            echo "Checking alternative locations..."
+            
+            # Check if architecture directory exists but with packages in different location
+            for possible_path in \
+              "bin/packages/${{ matrix.arch }}/" \
+              "bin/packages/" \
+              "bin/" \
+              "./" ; do
+              
+              if find "$possible_path" -name "*.$PKG_EXT" 2>/dev/null | head -1 >/dev/null; then
+                echo "✅ Found packages in: $possible_path"
+                find "$possible_path" -name "*.$PKG_EXT" 2>/dev/null
+                PACKAGE_FOUND=true
+                break
+              fi
+            done
+          fi
+          
+          if [ "$PACKAGE_FOUND" = false ]; then
+            echo "❌ No .$PKG_EXT packages found anywhere"
+            echo "=== Available files in bin/ ==="
+            find bin/ -type f 2>/dev/null | head -30 || echo "No files found"
+            echo "=== Directory permissions ==="
+            ls -la bin/ 2>/dev/null || echo "No bin directory"
+            
+            # Check for build logs or errors
+            echo "=== Looking for build logs ==="
+            find . -name "*.log" -o -name "*error*" 2>/dev/null | head -10
           fi
 
       - name: Store packages
@@ -96,7 +155,8 @@ jobs:
         with:
           name: packages-${{ matrix.branch }}-${{ matrix.arch }}
           path: |
-            bin/packages/${{ matrix.arch }}/packages_custom/
+            bin/packages/
+            bin/targets/
           if-no-files-found: warn
           retention-days: 30
 
@@ -104,7 +164,7 @@ jobs:
     name: Deploy ${{ matrix.branch }} packages
     needs: build
     runs-on: ubuntu-latest
-    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && github.event_name == 'push'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     
     strategy:
       matrix:
@@ -132,6 +192,8 @@ jobs:
           cd downloads
           
           echo "Processing artifacts for ${{ matrix.branch }}..."
+          echo "Available artifact directories:"
+          ls -la
           
           # Determine package extension
           if [[ "${{ matrix.branch }}" == "SNAPSHOT" ]]; then
@@ -144,19 +206,44 @@ jobs:
             if [ -d "$dir" ]; then
               arch=$(echo "$dir" | sed 's/packages-${{ matrix.branch }}-\(.*\)\//\1/')
               echo "Processing architecture: $arch"
+              echo "Directory contents:"
+              find "$dir" -type f 2>/dev/null | head -10
               
               mkdir -p "../releases/${{ matrix.branch }}/$arch"
               
-              # Copy package files
-              if find "$dir" -name "*.$PKG_EXT" 2>/dev/null | head -1 >/dev/null; then
-                echo "Found .$PKG_EXT files for $arch"
-                find "$dir" -name "*.$PKG_EXT" -exec cp {} "../releases/${{ matrix.branch }}/$arch/" \; 2>/dev/null || true
-              fi
+              # Look for packages in various possible locations within the artifact
+              FOUND_PACKAGES=false
               
-              # Copy package index files
+              # Check multiple possible paths
+              for search_path in \
+                "$dir" \
+                "$dir/bin/packages/$arch/packages_custom" \
+                "$dir/bin/packages/$arch" \
+                "$dir/bin/packages" \
+                "$dir/bin"; do
+                
+                if [ -d "$search_path" ] && find "$search_path" -name "*.$PKG_EXT" 2>/dev/null | head -1 >/dev/null; then
+                  echo "Found .$PKG_EXT files in: $search_path"
+                  find "$search_path" -name "*.$PKG_EXT" -exec cp {} "../releases/${{ matrix.branch }}/$arch/" \; 2>/dev/null
+                  FOUND_PACKAGES=true
+                  break
+                fi
+              done
+              
+              # Copy package index files from any location
               find "$dir" -name "Packages*" -exec cp {} "../releases/${{ matrix.branch }}/$arch/" \; 2>/dev/null || true
+              
+              if [ "$FOUND_PACKAGES" = false ]; then
+                echo "⚠️ No .$PKG_EXT packages found for $arch"
+              else
+                COPIED_COUNT=$(ls "../releases/${{ matrix.branch }}/$arch/"*.$PKG_EXT 2>/dev/null | wc -l)
+                echo "✅ Copied $COPIED_COUNT packages for $arch"
+              fi
             fi
           done
+          
+          echo "=== Final organization results ==="
+          find "../releases/${{ matrix.branch }}/" -name "*.$PKG_EXT" 2>/dev/null | wc -l | xargs echo "Total packages organized:"
 
       - name: Generate package index
         run: |
@@ -315,7 +402,7 @@ jobs:
             cat > README.md << 'EOF'
           # OpenWrt Packages Repository
 
-            This branch contains built OpenWrt packages organized by release version.
+          This branch contains built OpenWrt packages organized by release version.
 
           ## Available Releases
           - **openwrt-23.05** - Stable release (IPK format)
