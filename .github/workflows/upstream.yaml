@@ -32,8 +32,18 @@ jobs:
         
         echo "Moving files to packages directory..."
         # Hapus semua isi folder packages kecuali .gitkeep jika ada
-        find packages -mindepth 1 -name '.gitkeep' -prune -o -type f -delete
-        find packages -mindepth 1 -name '.gitkeep' -prune -o -type d -exec rm -rf {} +
+        if [ -f packages/.gitkeep ]; then
+          # Jika ada .gitkeep, backup dulu
+          cp packages/.gitkeep /tmp/.gitkeep.backup
+        fi
+        
+        # Hapus semua isi folder packages
+        rm -rf packages/*
+        
+        # Restore .gitkeep jika ada
+        if [ -f /tmp/.gitkeep.backup ]; then
+          mv /tmp/.gitkeep.backup packages/.gitkeep
+        fi
         
         # Pindahkan semua file kecuali .github dan README.md
         cd kwrt-packages-main
