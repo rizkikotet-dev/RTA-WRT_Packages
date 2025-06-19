@@ -13,7 +13,7 @@ on:
 
 jobs:
   build:
-    name: Build ${{ matrix.arch }}
+    name: Build ${{ matrix.release }}-${{ matrix.arch }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -26,65 +26,77 @@ jobs:
           - "aarch64_cortex-a53"
           - "aarch64_cortex-a72"
           - "aarch64_generic"
-          - "arc_arc700"
-          - "arc_archs"
-          - "arm_arm1176jzf-s_vfp"
-          - "arm_arm926ej-s"
-          - "arm_cortex-a15_neon-vfpv4"
-          - "arm_cortex-a5_vfpv4"
-          - "arm_cortex-a7"
-          - "arm_cortex-a7_neon-vfpv4"
-          - "arm_cortex-a8_vfpv3"
-          - "arm_cortex-a9"
-          - "arm_cortex-a9_neon"
-          - "arm_cortex-a9_vfpv3-d16"
-          - "arm_fa526"
-          - "arm_mpcore"
-          - "arm_xscale"
-          - "i386_pentium-mmx"
-          - "i386_pentium4"
           - "mips_24kc"
           - "mips_4kec"
           - "mips_mips32"
           - "mipsel_24kc"
-          - "mipsel_24kc_24kf"
           - "mipsel_74kc"
           - "mipsel_mips32"
-          - "powerpc_464fp"
-          - "powerpc_8540"
           - "x86_64"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine architecture for release
+        id: arch_setup
+        run: |
+          if [ "${{ matrix.release }}" = "snapshot" ]; then
+            echo "arch=${{ matrix.arch }}" >> $GITHUB_OUTPUT
+          else
+            echo "arch=${{ matrix.arch }}-${{ matrix.release }}" >> $GITHUB_OUTPUT
+          fi
 
       - name: Build packages
-        uses: openwrt/gh-action-sdk@v7
+        uses: openwrt/gh-action-sdk@main
         env:
-          ARCH: ${{ matrix.arch }}
+          ARCH: ${{ steps.arch_setup.outputs.arch }}
           FEEDNAME: packages_custom
-          PACKAGES: packages
+          FEED_DIR: ${{ github.workspace }}/packages
           V: s
+          BUILD_LOG: 1
+          INDEX: 1
+          IGNORE_ERRORS: 0
         with:
           release: ${{ matrix.release }}
+
+      - name: Check build results
+        run: |
+          echo "=== Build completed for ${{ matrix.release }}-${{ matrix.arch }} ==="
+          echo "Checking for built packages..."
+          
+          # Check for both ipk and apk files
+          if find bin/packages/${{ steps.arch_setup.outputs.arch }}/packages_custom/ -name "*.ipk" -o -name "*.apk" 2>/dev/null | head -1; then
+            echo "✅ Packages found:"
+            find bin/packages/${{ steps.arch_setup.outputs.arch }}/packages_custom/ -name "*.ipk" -o -name "*.apk" 2>/dev/null || true
+          else
+            echo "❌ No packages found"
+            echo "Directory contents:"
+            ls -la bin/packages/${{ steps.arch_setup.outputs.arch }}/ 2>/dev/null || echo "Directory not found"
+          fi
 
       - name: Store packages
         uses: actions/upload-artifact@v4
         with:
           name: packages-${{ matrix.release }}-${{ matrix.arch }}
           path: |
-            bin/packages/${{ matrix.arch }}/packages_custom/*.ipk
-            bin/packages/${{ matrix.arch }}/packages_custom/*.apk
+            bin/packages/${{ steps.arch_setup.outputs.arch }}/packages_custom/*.ipk
+            bin/packages/${{ steps.arch_setup.outputs.arch }}/packages_custom/*.apk
+            bin/packages/${{ steps.arch_setup.outputs.arch }}/packages_custom/Packages*
+          if-no-files-found: warn
 
-      - name: Store logs
+      - name: Store build logs
         uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
           name: logs-${{ matrix.release }}-${{ matrix.arch }}
           path: logs/
+          if-no-files-found: ignore
 
   deploy:
-    name: Deploy to releases branch
+    name: Deploy ${{ matrix.release }} packages
     needs: build
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
@@ -102,7 +114,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download all artifacts
+      - name: Download all artifacts for release
         uses: actions/download-artifact@v4
         with:
           pattern: packages-${{ matrix.release }}-*
@@ -112,52 +124,66 @@ jobs:
         run: |
           mkdir -p releases/${{ matrix.release }}
           cd downloads
+          
+          echo "Processing artifacts for ${{ matrix.release }}..."
           for dir in packages-${{ matrix.release }}-*/; do
             if [ -d "$dir" ]; then
               arch=$(echo "$dir" | sed 's/packages-${{ matrix.release }}-\(.*\)\//\1/')
+              echo "Processing architecture: $arch"
+              
               mkdir -p "../releases/${{ matrix.release }}/$arch"
-              # Copy both ipk and apk files
-              if [ -n "$(find "$dir" -name "*.ipk" -o -name "*.apk" 2>/dev/null)" ]; then
-                cp "$dir"/*.ipk "../releases/${{ matrix.release }}/$arch/" 2>/dev/null || true
-                cp "$dir"/*.apk "../releases/${{ matrix.release }}/$arch/" 2>/dev/null || true
-              fi
+              
+              # Copy package files (both ipk and apk)
+              find "$dir" -name "*.ipk" -exec cp {} "../releases/${{ matrix.release }}/$arch/" \; 2>/dev/null || true
+              find "$dir" -name "*.apk" -exec cp {} "../releases/${{ matrix.release }}/$arch/" \; 2>/dev/null || true
+              
+              # Copy package index files if they exist
+              find "$dir" -name "Packages*" -exec cp {} "../releases/${{ matrix.release }}/$arch/" \; 2>/dev/null || true
             fi
           done
 
-      - name: Generate package index
+      - name: Generate package index (if not exists)
         run: |
           cd releases/${{ matrix.release }}
           for arch_dir in */; do
             if [ -d "$arch_dir" ] && [ -n "$(find "$arch_dir" -name "*.ipk" -o -name "*.apk" 2>/dev/null)" ]; then
               arch=$(basename "$arch_dir")
-              echo "Generating index for $arch"
+              echo "Checking index for $arch"
+              
               cd "$arch_dir"
               
-              # Create Packages file for both ipk and apk
-              for pkg in *.ipk *.apk; do
-                if [ -f "$pkg" ]; then
-                  # Get package extension
-                  ext="${pkg##*.}"
-                  # Get package name without extension
-                  pkg_name=$(basename "$pkg" .$ext)
-                  
-                  echo "Package: $pkg_name"
-                  echo "Version: $(date +%Y%m%d)"
-                  echo "Architecture: $arch"
-                  echo "Filename: $pkg"
-                  echo "Size: $(stat -c%s "$pkg")"
-                  echo "SHA256sum: $(sha256sum "$pkg" | cut -d' ' -f1)"
-                  if [ "$ext" = "apk" ]; then
-                    echo "Format: apk"
-                  else
-                    echo "Format: ipk"
+              # Generate index only if Packages file doesn't exist
+              if [ ! -f "Packages" ]; then
+                echo "Generating package index for $arch"
+                
+                # Create Packages file for both ipk and apk
+                for pkg in *.ipk *.apk; do
+                  if [ -f "$pkg" ]; then
+                    # Get package extension
+                    ext="${pkg##*.}"
+                    # Get package name without extension
+                    pkg_name=$(basename "$pkg" .$ext)
+                    
+                    echo "Package: $pkg_name"
+                    echo "Version: $(date +%Y%m%d)"
+                    echo "Architecture: $arch"
+                    echo "Filename: $pkg"
+                    echo "Size: $(stat -c%s "$pkg")"
+                    echo "SHA256sum: $(sha256sum "$pkg" | cut -d' ' -f1)"
+                    if [ "$ext" = "apk" ]; then
+                      echo "Format: apk"
+                    else
+                      echo "Format: ipk"
+                    fi
+                    echo ""
                   fi
-                  echo ""
-                fi
-              done > Packages
-              
-              # Compress Packages file
-              gzip -k Packages
+                done > Packages
+                
+                # Compress Packages file
+                gzip -k Packages
+              else
+                echo "Index already exists for $arch"
+              fi
               
               cd ..
             fi
@@ -171,40 +197,81 @@ jobs:
           
           Built on: $(date)
           Commit: ${{ github.sha }}
+          Branch: ${{ github.ref_name }}
           
           ## Package Format
           $(if [ "${{ matrix.release }}" = "snapshot" ]; then echo "- Format: APK (Alpine Package Keeper)"; else echo "- Format: IPK (Itsy Package)"; fi)
+          
+          ## Installation
+          
+          ### For IPK packages (23.05.5, 24.10.1):
+          \`\`\`bash
+          # Add custom feed
+          echo "src/gz packages_custom https://raw.githubusercontent.com/${{ github.repository }}/releases/${{ matrix.release }}/[ARCH]" >> /etc/opkg/customfeeds.conf
+          
+          # Update package lists
+          opkg update
+          
+          # Install package
+          opkg install [PACKAGE_NAME]
+          \`\`\`
+          
+          ### For APK packages (snapshot):
+          \`\`\`bash
+          # Add custom repository
+          echo "https://raw.githubusercontent.com/${{ github.repository }}/releases/${{ matrix.release }}/[ARCH]" >> /etc/apk/repositories
+          
+          # Update package lists
+          apk update
+          
+          # Install package
+          apk add [PACKAGE_NAME]
+          \`\`\`
           
           ## Available Architectures
           
           EOF
           
+          total_packages=0
           for arch_dir in */; do
-            if [ -d "$arch_dir" ] && [ -n "$(find "$arch_dir" -name "*.ipk" -o -name "*.apk" 2>/dev/null)" ]; then
+            if [ -d "$arch_dir" ]; then
               arch=$(basename "$arch_dir")
-              count=$(find "$arch_dir" -name "*.ipk" -o -name "*.apk" | wc -l)
-              echo "- $arch ($count packages)" >> README.md
+              count=$(find "$arch_dir" -name "*.ipk" -o -name "*.apk" 2>/dev/null | wc -l)
+              if [ "$count" -gt 0 ]; then
+                echo "- **$arch** ($count packages)" >> README.md
+                total_packages=$((total_packages + count))
+              fi
             fi
           done
+          
+          echo "" >> README.md
+          echo "**Total: $total_packages packages**" >> README.md
+
+      - name: Setup Git for releases branch
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
 
       - name: Deploy to releases branch
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          
-          # Create or switch to releases branch
+          # Try to fetch releases branch
           git fetch origin releases:releases 2>/dev/null || true
           
           if git show-ref --verify --quiet refs/heads/releases; then
-            echo "Switching to existing releases branch"
+            echo "✅ Switching to existing releases branch"
             git checkout releases
           else
-            echo "Creating new releases branch"
+            echo "🆕 Creating new releases branch"
             git checkout --orphan releases
             git rm -rf . 2>/dev/null || true
             echo "# OpenWrt Packages Repository" > README.md
             echo "" >> README.md
-            echo "This branch contains built OpenWrt packages." >> README.md
+            echo "This branch contains built OpenWrt packages organized by release version." >> README.md
+            echo "" >> README.md
+            echo "## Available Releases" >> README.md
+            echo "- 23.05.5 (IPK format)" >> README.md
+            echo "- 24.10.1 (IPK format)" >> README.md
+            echo "- snapshot (APK format)" >> README.md
             git add README.md
             git commit -m "Initial commit for releases branch"
             git push origin releases
@@ -221,8 +288,10 @@ jobs:
           # Add and commit changes
           git add ${{ matrix.release }}/
           if git diff --staged --quiet; then
-            echo "No changes to commit for ${{ matrix.release }}"
+            echo "ℹ️  No changes to commit for ${{ matrix.release }}"
           else
-            git commit -m "Update packages for ${{ matrix.release }} - $(date)"
+            echo "✅ Committing changes for ${{ matrix.release }}"
+            git commit -m "Update packages for ${{ matrix.release }} - $(date '+%Y-%m-%d %H:%M:%S')"
             git push origin releases
+            echo "🚀 Successfully deployed ${{ matrix.release }} packages to releases branch"
           fi
