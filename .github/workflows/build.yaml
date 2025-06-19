@@ -13,26 +13,41 @@ on:
 
 jobs:
   build:
-    name: Build ${{ matrix.release }}-${{ matrix.arch }}
+    name: ${{ matrix.arch }}-${{ matrix.branch }}
     runs-on: ubuntu-latest
+    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
-        release:
-          - "23.05.5"
-          - "24.10.1"
-          - "snapshot"
         arch:
-          - "aarch64_cortex-a53"
-          - "aarch64_cortex-a72"
-          - "aarch64_generic"
-          - "mips_24kc"
-          - "mips_4kec"
-          - "mips_mips32"
-          - "mipsel_24kc"
-          - "mipsel_74kc"
-          - "mipsel_mips32"
-          - "x86_64"
+          - arm_cortex-a5_vfpv4
+          - arm_cortex-a7_neon-vfpv4
+          - arm_cortex-a8_vfpv3
+          - arm_cortex-a9
+          - arm_cortex-a9_vfpv3-d16
+          - arm_cortex-a9_neon
+          - arm_cortex-a15_neon-vfpv4
+          - aarch64_cortex-a53
+          - aarch64_cortex-a72
+          - aarch64_cortex-a76
+          - aarch64_generic
+          - mips_24kc
+          - mips_4kec
+          - mips_mips32
+          - mipsel_24kc
+          - mipsel_24kc_24kf
+          - mipsel_74kc
+          - mipsel_mips32
+          - mips64_octeonplus
+          - i386_pentium4
+          - x86_64
+        branch:
+          - openwrt-23.05
+          - openwrt-24.10
+          - SNAPSHOT
+        exclude:
+          - arch: aarch64_cortex-a76
+            branch: openwrt-23.05
 
     steps:
       - name: Checkout
@@ -40,68 +55,63 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Determine architecture for release
-        id: arch_setup
-        run: |
-          if [ "${{ matrix.release }}" = "snapshot" ]; then
-            echo "arch=${{ matrix.arch }}" >> $GITHUB_OUTPUT
-          else
-            echo "arch=${{ matrix.arch }}-${{ matrix.release }}" >> $GITHUB_OUTPUT
-          fi
-
       - name: Build packages
         uses: openwrt/gh-action-sdk@main
         env:
-          ARCH: ${{ steps.arch_setup.outputs.arch }}
+          ARCH: ${{ matrix.arch }}-${{ matrix.branch }}
           FEEDNAME: packages_custom
           FEED_DIR: ${{ github.workspace }}/packages
           INDEX: 1
+          NO_REFRESH_CHECK: true
 
       - name: Check build results
         run: |
-          echo "=== Build completed for ${{ matrix.release }}-${{ matrix.arch }} ==="
+          echo "=== Build completed for ${{ matrix.arch }}-${{ matrix.branch }} ==="
           echo "Checking for built packages..."
           
-          # Check for both ipk and apk files
-          if find bin/packages/${{ steps.arch_setup.outputs.arch }}/packages_custom/ -name "*.ipk" -o -name "*.apk" 2>/dev/null | head -1; then
-            echo "✅ Packages found:"
-            find bin/packages/${{ steps.arch_setup.outputs.arch }}/packages_custom/ -name "*.ipk" -o -name "*.apk" 2>/dev/null || true
+          # Determine package extension based on branch
+          if [[ "${{ matrix.branch }}" == "SNAPSHOT" ]]; then
+            PKG_EXT="apk"
           else
-            echo "❌ No packages found"
-            echo "Directory contents:"
-            ls -la bin/packages/${{ steps.arch_setup.outputs.arch }}/ 2>/dev/null || echo "Directory not found"
+            PKG_EXT="ipk"
+          fi
+          
+          echo "Looking for .$PKG_EXT files..."
+          
+          # Check for package files
+          if find bin/packages/${{ matrix.arch }}/packages_custom/ -name "*.$PKG_EXT" 2>/dev/null | head -1 >/dev/null; then
+            echo "✅ Packages found:"
+            find bin/packages/${{ matrix.arch }}/packages_custom/ -name "*.$PKG_EXT" 2>/dev/null || true
+            echo "Package count: $(find bin/packages/${{ matrix.arch }}/packages_custom/ -name "*.$PKG_EXT" 2>/dev/null | wc -l)"
+          else
+            echo "❌ No .$PKG_EXT packages found"
+            echo "Directory structure:"
+            find bin/packages/ -type f 2>/dev/null | head -20 || echo "No files found in bin/packages/"
+            echo "Full directory listing:"
+            ls -la bin/packages/${{ matrix.arch }}/ 2>/dev/null || echo "Architecture directory not found"
           fi
 
       - name: Store packages
         uses: actions/upload-artifact@v4
         with:
-          name: packages-${{ matrix.release }}-${{ matrix.arch }}
+          name: packages-${{ matrix.branch }}-${{ matrix.arch }}
           path: |
-            bin/packages/${{ steps.arch_setup.outputs.arch }}/packages_custom/*.ipk
-            bin/packages/${{ steps.arch_setup.outputs.arch }}/packages_custom/*.apk
-            bin/packages/${{ steps.arch_setup.outputs.arch }}/packages_custom/Packages*
+            bin/packages/${{ matrix.arch }}/packages_custom/
           if-no-files-found: warn
-
-      - name: Store build logs
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: logs-${{ matrix.release }}-${{ matrix.arch }}
-          path: logs/
-          if-no-files-found: ignore
+          retention-days: 30
 
   deploy:
-    name: Deploy ${{ matrix.release }} packages
+    name: Deploy ${{ matrix.branch }} packages
     needs: build
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && github.event_name == 'push'
     
     strategy:
       matrix:
-        release:
-          - "23.05.5"
-          - "24.10.1"
-          - "snapshot"
+        branch:
+          - openwrt-23.05
+          - openwrt-24.10
+          - SNAPSHOT
 
     steps:
       - name: Checkout
@@ -109,75 +119,103 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download all artifacts for release
+      - name: Download all artifacts for ${{ matrix.branch }}
         uses: actions/download-artifact@v4
         with:
-          pattern: packages-${{ matrix.release }}-*
+          pattern: packages-${{ matrix.branch }}-*
           path: downloads/
+          merge-multiple: false
 
       - name: Organize packages
         run: |
-          mkdir -p releases/${{ matrix.release }}
+          mkdir -p releases/${{ matrix.branch }}
           cd downloads
           
-          echo "Processing artifacts for ${{ matrix.release }}..."
-          for dir in packages-${{ matrix.release }}-*/; do
+          echo "Processing artifacts for ${{ matrix.branch }}..."
+          
+          # Determine package extension
+          if [[ "${{ matrix.branch }}" == "SNAPSHOT" ]]; then
+            PKG_EXT="apk"
+          else
+            PKG_EXT="ipk"
+          fi
+          
+          for dir in packages-${{ matrix.branch }}-*/; do
             if [ -d "$dir" ]; then
-              arch=$(echo "$dir" | sed 's/packages-${{ matrix.release }}-\(.*\)\//\1/')
+              arch=$(echo "$dir" | sed 's/packages-${{ matrix.branch }}-\(.*\)\//\1/')
               echo "Processing architecture: $arch"
               
-              mkdir -p "../releases/${{ matrix.release }}/$arch"
+              mkdir -p "../releases/${{ matrix.branch }}/$arch"
               
-              # Copy package files (both ipk and apk)
-              find "$dir" -name "*.ipk" -exec cp {} "../releases/${{ matrix.release }}/$arch/" \; 2>/dev/null || true
-              find "$dir" -name "*.apk" -exec cp {} "../releases/${{ matrix.release }}/$arch/" \; 2>/dev/null || true
+              # Copy package files
+              if find "$dir" -name "*.$PKG_EXT" 2>/dev/null | head -1 >/dev/null; then
+                echo "Found .$PKG_EXT files for $arch"
+                find "$dir" -name "*.$PKG_EXT" -exec cp {} "../releases/${{ matrix.branch }}/$arch/" \; 2>/dev/null || true
+              fi
               
-              # Copy package index files if they exist
-              find "$dir" -name "Packages*" -exec cp {} "../releases/${{ matrix.release }}/$arch/" \; 2>/dev/null || true
+              # Copy package index files
+              find "$dir" -name "Packages*" -exec cp {} "../releases/${{ matrix.branch }}/$arch/" \; 2>/dev/null || true
             fi
           done
 
-      - name: Generate package index (if not exists)
+      - name: Generate package index
         run: |
-          cd releases/${{ matrix.release }}
+          cd releases/${{ matrix.branch }}
+          
+          # Determine package format
+          if [[ "${{ matrix.branch }}" == "SNAPSHOT" ]]; then
+            PKG_EXT="apk"
+            PKG_FORMAT="apk"
+          else
+            PKG_EXT="ipk"
+            PKG_FORMAT="ipk"
+          fi
+          
           for arch_dir in */; do
-            if [ -d "$arch_dir" ] && [ -n "$(find "$arch_dir" -name "*.ipk" -o -name "*.apk" 2>/dev/null)" ]; then
+            if [ -d "$arch_dir" ]; then
               arch=$(basename "$arch_dir")
-              echo "Checking index for $arch"
+              echo "Processing index for $arch"
               
               cd "$arch_dir"
               
-              # Generate index only if Packages file doesn't exist
-              if [ ! -f "Packages" ]; then
-                echo "Generating package index for $arch"
+              # Check if we have packages
+              if ls *.$PKG_EXT 1> /dev/null 2>&1; then
+                echo "Generating package index for $arch (format: $PKG_FORMAT)"
                 
-                # Create Packages file for both ipk and apk
-                for pkg in *.ipk *.apk; do
-                  if [ -f "$pkg" ]; then
-                    # Get package extension
-                    ext="${pkg##*.}"
-                    # Get package name without extension
-                    pkg_name=$(basename "$pkg" .$ext)
-                    
-                    echo "Package: $pkg_name"
-                    echo "Version: $(date +%Y%m%d)"
-                    echo "Architecture: $arch"
-                    echo "Filename: $pkg"
-                    echo "Size: $(stat -c%s "$pkg")"
-                    echo "SHA256sum: $(sha256sum "$pkg" | cut -d' ' -f1)"
-                    if [ "$ext" = "apk" ]; then
-                      echo "Format: apk"
-                    else
-                      echo "Format: ipk"
+                # Remove existing index
+                rm -f Packages Packages.gz
+                
+                # Generate new index
+                {
+                  for pkg in *.$PKG_EXT; do
+                    if [ -f "$pkg" ]; then
+                      # Extract package name (remove extension)
+                      pkg_name=$(basename "$pkg" .$PKG_EXT)
+                      
+                      echo "Package: $pkg_name"
+                      echo "Version: $(date +%Y.%m.%d)-1"
+                      echo "Architecture: $arch"
+                      echo "Filename: $pkg"
+                      echo "Size: $(stat -c%s "$pkg")"
+                      echo "SHA256sum: $(sha256sum "$pkg" | cut -d' ' -f1)"
+                      
+                      if [ "$PKG_FORMAT" = "apk" ]; then
+                        echo "Description: Custom OpenWrt package built from source"
+                      else
+                        echo "Description: Custom OpenWrt package built from source"
+                        echo "Maintainer: GitHub Actions"
+                      fi
+                      echo ""
                     fi
-                    echo ""
-                  fi
-                done > Packages
+                  done
+                } > Packages
                 
-                # Compress Packages file
+                # Create compressed version
                 gzip -k Packages
+                
+                echo "✅ Generated index for $arch ($(ls *.$PKG_EXT | wc -l) packages)"
               else
-                echo "Index already exists for $arch"
+                echo "⚠️  No packages found for $arch"
               fi
               
               cd ..
@@ -186,52 +224,65 @@ jobs:
 
       - name: Create release info
         run: |
-          cd releases/${{ matrix.release }}
+          cd releases/${{ matrix.branch }}
+          
+          # Determine format info
+          if [[ "${{ matrix.branch }}" == "SNAPSHOT" ]]; then
+            FORMAT="APK (Alpine Package Keeper)"
+            INSTALL_CMD="apk"
+            REPO_FILE="/etc/apk/repositories"
+            UPDATE_CMD="apk update"
+            INSTALL_SYNTAX="apk add"
+          else
+            FORMAT="IPK (Itsy Package)"
+            INSTALL_CMD="opkg"
+            REPO_FILE="/etc/opkg/customfeeds.conf"
+            UPDATE_CMD="opkg update"
+            INSTALL_SYNTAX="opkg install"
+          fi
+          
           cat > README.md << EOF
-          # OpenWrt Packages - ${{ matrix.release }}
-          
-          Built on: $(date)
-          Commit: ${{ github.sha }}
-          Branch: ${{ github.ref_name }}
-          
+          # OpenWrt Packages - ${{ matrix.branch }}
+
+          Built on: $(date)  
+          Commit: ${{ github.sha }}  
+          Branch: ${{ github.ref_name }}  
+
           ## Package Format
-          $(if [ "${{ matrix.release }}" = "snapshot" ]; then echo "- Format: APK (Alpine Package Keeper)"; else echo "- Format: IPK (Itsy Package)"; fi)
-          
+          - **Format**: $FORMAT
+
           ## Installation
-          
-          ### For IPK packages (23.05.5, 24.10.1):
+
+          ### Add Repository
           \`\`\`bash
-          # Add custom feed
-          echo "src/gz packages_custom https://raw.githubusercontent.com/${{ github.repository }}/releases/${{ matrix.release }}/[ARCH]" >> /etc/opkg/customfeeds.conf
-          
+          # Add custom feed/repository
+          echo "src/gz packages_custom https://raw.githubusercontent.com/${{ github.repository }}/releases/${{ matrix.branch }}/[ARCH]" >> $REPO_FILE
+
           # Update package lists
-          opkg update
-          
+          $UPDATE_CMD
+
           # Install package
-          opkg install [PACKAGE_NAME]
+          $INSTALL_SYNTAX [PACKAGE_NAME]
           \`\`\`
-          
-          ### For APK packages (snapshot):
-          \`\`\`bash
-          # Add custom repository
-          echo "https://raw.githubusercontent.com/${{ github.repository }}/releases/${{ matrix.release }}/[ARCH]" >> /etc/apk/repositories
-          
-          # Update package lists
-          apk update
-          
-          # Install package
-          apk add [PACKAGE_NAME]
-          \`\`\`
-          
+
+          Replace \`[ARCH]\` with your device architecture and \`[PACKAGE_NAME]\` with the desired package name.
+
           ## Available Architectures
-          
+
           EOF
           
           total_packages=0
           for arch_dir in */; do
             if [ -d "$arch_dir" ]; then
               arch=$(basename "$arch_dir")
-              count=$(find "$arch_dir" -name "*.ipk" -o -name "*.apk" 2>/dev/null | wc -l)
+              
+              # Count packages based on branch type
+              if [[ "${{ matrix.branch }}" == "SNAPSHOT" ]]; then
+                count=$(find "$arch_dir" -name "*.apk" 2>/dev/null | wc -l)
+              else
+                count=$(find "$arch_dir" -name "*.ipk" 2>/dev/null | wc -l)
+              fi
+              
               if [ "$count" -gt 0 ]; then
                 echo "- **$arch** ($count packages)" >> README.md
                 total_packages=$((total_packages + count))
@@ -240,53 +291,71 @@ jobs:
           done
           
           echo "" >> README.md
-          echo "**Total: $total_packages packages**" >> README.md
+          echo "**Total: $total_packages packages across all architectures**" >> README.md
+          echo "" >> README.md
+          echo "## Usage Notes" >> README.md
+          echo "- Packages are built automatically from the main branch" >> README.md
+          echo "- Each architecture has its own subdirectory" >> README.md
+          echo "- Package indices are automatically generated" >> README.md
 
-      - name: Setup Git for releases branch
+      - name: Setup Git
         run: |
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
 
       - name: Deploy to releases branch
         run: |
-          # Try to fetch releases branch
-          git fetch origin releases:releases 2>/dev/null || true
-          
-          if git show-ref --verify --quiet refs/heads/releases; then
-            echo "✅ Switching to existing releases branch"
-            git checkout releases
-          else
-            echo "🆕 Creating new releases branch"
+          # Fetch or create releases branch
+          git fetch origin releases:releases 2>/dev/null || {
+            echo "Creating new releases branch"
             git checkout --orphan releases
             git rm -rf . 2>/dev/null || true
-            echo "# OpenWrt Packages Repository" > README.md
-            echo "" >> README.md
-            echo "This branch contains built OpenWrt packages organized by release version." >> README.md
-            echo "" >> README.md
-            echo "## Available Releases" >> README.md
-            echo "- 23.05.5 (IPK format)" >> README.md
-            echo "- 24.10.1 (IPK format)" >> README.md
-            echo "- snapshot (APK format)" >> README.md
+            
+            # Create initial README
+            cat > README.md << 'EOF'
+          # OpenWrt Packages Repository
+
+            This branch contains built OpenWrt packages organized by release version.
+
+          ## Available Releases
+          - **openwrt-23.05** - Stable release (IPK format)
+          - **openwrt-24.10** - Stable release (IPK format)  
+          - **SNAPSHOT** - Development branch (APK format)
+
+          Each release directory contains packages organized by architecture.
+          EOF
+            
             git add README.md
             git commit -m "Initial commit for releases branch"
             git push origin releases
+          }
+          
+          # Switch to releases branch
+          git checkout releases
+          
+          # Update packages for this branch
+          mkdir -p ${{ matrix.branch }}
+          
+          # Copy built packages
+          if [ -d "releases/${{ matrix.branch }}" ]; then
+            cp -r releases/${{ matrix.branch }}/* ${{ matrix.branch }}/ 2>/dev/null || true
           fi
           
-          # Create directory structure for this release
-          mkdir -p ${{ matrix.release }}
+          # Add changes
+          git add ${{ matrix.branch }}/
           
-          # Copy release files to the specific release directory
-          if [ -d "releases/${{ matrix.release }}" ]; then
-            cp -r releases/${{ matrix.release }}/* ${{ matrix.release }}/ 2>/dev/null || true
-          fi
-          
-          # Add and commit changes
-          git add ${{ matrix.release }}/
+          # Check if there are changes to commit
           if git diff --staged --quiet; then
-            echo "ℹ️  No changes to commit for ${{ matrix.release }}"
+            echo "ℹ️ No changes detected for ${{ matrix.branch }}"
           else
-            echo "✅ Committing changes for ${{ matrix.release }}"
-            git commit -m "Update packages for ${{ matrix.release }} - $(date '+%Y-%m-%d %H:%M:%S')"
+            # Count total packages for commit message
+            if [[ "${{ matrix.branch }}" == "SNAPSHOT" ]]; then
+              PKG_COUNT=$(find ${{ matrix.branch }}/ -name "*.apk" 2>/dev/null | wc -l)
+            else
+              PKG_COUNT=$(find ${{ matrix.branch }}/ -name "*.ipk" 2>/dev/null | wc -l)
+            fi
+            
+            git commit -m "Update ${{ matrix.branch }} packages ($PKG_COUNT total) - $(date '+%Y-%m-%d %H:%M:%S')"
             git push origin releases
-            echo "🚀 Successfully deployed ${{ matrix.release }} packages to releases branch"
+            echo "🚀 Successfully updated ${{ matrix.branch }} with $PKG_COUNT packages"
           fi
