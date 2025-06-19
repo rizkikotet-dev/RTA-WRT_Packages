@@ -55,12 +55,9 @@ jobs:
           ARCH: ${{ steps.arch_setup.outputs.arch }}
           FEEDNAME: packages_custom
           FEED_DIR: ${{ github.workspace }}/packages
-          V: s
           BUILD_LOG: 1
           INDEX: 1
           IGNORE_ERRORS: 0
-        with:
-          release: ${{ matrix.release }}
 
       - name: Check build results
         run: |
