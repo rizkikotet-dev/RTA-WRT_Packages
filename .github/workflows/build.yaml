@@ -55,9 +55,7 @@ jobs:
           ARCH: ${{ steps.arch_setup.outputs.arch }}
           FEEDNAME: packages_custom
           FEED_DIR: ${{ github.workspace }}/packages
-          BUILD_LOG: 1
           INDEX: 1
-          IGNORE_ERRORS: 0
 
       - name: Check build results
         run: |
