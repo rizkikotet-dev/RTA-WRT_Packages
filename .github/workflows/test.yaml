@@ -3,15 +3,10 @@ name: Build and Release OpenWRT Packages
 on:
   workflow_dispatch:
 
-env:
-  RETENTION_DAYS: 7
-  BUILD_TIMEOUT_MIN: 120
-
 jobs:
   build:
     name: Build ${{ matrix.arch }} (${{ matrix.branch }})
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ env.BUILD_TIMEOUT_MIN }}
     continue-on-error: true
     strategy:
       fail-fast: false
@@ -110,7 +105,6 @@ jobs:
           path: |
             releases/${{ matrix.branch }}/${{ matrix.arch }}/*
             packages_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz
-          retention-days: ${{ env.RETENTION_DAYS }}
 
   release:
     name: Publish Packages

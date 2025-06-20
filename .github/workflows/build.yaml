@@ -209,7 +209,6 @@ jobs:
           FEED_DIR: ./packages/
           INDEX: 1
           NO_REFRESH_CHECK: true
-          FORCE_REBUILD: ${{ github.event.inputs.force_rebuild }}
 
       - name: 🔍 Analyze Build Results
         id: analyze-build
