@@ -206,7 +206,7 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.branch }}
           FEEDNAME: packages_custom
-          FEED_DIR: packages
+          FEED_DIR: ./packages/
           INDEX: 1
           NO_REFRESH_CHECK: true
           FORCE_REBUILD: ${{ github.event.inputs.force_rebuild }}

@@ -52,7 +52,7 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.branch }}
           FEEDNAME: custom_packages
-          FEED_DIR: packages
+          FEED_DIR: ./packages/
           INDEX: 1
           NO_REFRESH_CHECK: true
 
