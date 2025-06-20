@@ -1,4 +1,4 @@
-name: Build OpenWrt Packages
+name: 🚀 Build OpenWrt Packages
 
 on:
   push:
@@ -10,172 +10,293 @@ on:
     paths:
       - 'packages/**'
   workflow_dispatch:
+    inputs:
+      target_arch:
+        description: '🎯 Target Architecture (leave empty for all)'
+        required: false
+        type: choice
+        options:
+          - ''
+          - 'aarch64_cortex-a53'
+          - 'aarch64_cortex-a72'
+          - 'aarch64_cortex-a76'
+          - 'aarch64_generic'
+          - 'x86_64'
+      target_branch:
+        description: '🌿 Target Branch (leave empty for all)'
+        required: false
+        type: choice
+        options:
+          - ''
+          - 'openwrt-23.05'
+          - 'openwrt-24.10'
+          - 'SNAPSHOT'
+      force_rebuild:
+        description: '🔧 Force rebuild all packages'
+        required: false
+        default: false
+        type: boolean
 
 env:
   FORCE_UNSAFE_CONFIGURE: 1
+  BUILD_DATE: ${{ github.event.head_commit.timestamp || github.run_id }}
 
 jobs:
-  build:
-    name: ${{ matrix.arch }}-${{ matrix.branch }}
+  prepare:
+    name: 🔍 Prepare Build Matrix
     runs-on: ubuntu-latest
-    continue-on-error: true
-    strategy:
-      fail-fast: false
-      matrix:
-        arch:
-          - aarch64_cortex-a53
-          - aarch64_cortex-a72
-          - aarch64_cortex-a76
-          - aarch64_generic
-          - x86_64
-        branch:
-          - openwrt-23.05
-          - openwrt-24.10
-          - SNAPSHOT
-        exclude:
-          - arch: aarch64_cortex-a76
-            branch: openwrt-23.05
-
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      packages-found: ${{ steps.scan-packages.outputs.packages-found }}
+      total-packages: ${{ steps.scan-packages.outputs.total-packages }}
+    
     steps:
-      - name: Checkout
+      - name: 📂 Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Free disk space
+      - name: 📦 Scan Available Packages
+        id: scan-packages
         run: |
-          # Remove unnecessary packages and files
-          sudo apt-get remove -y --purge man-db
-          sudo apt-get clean
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /usr/share/swift
-          sudo rm -rf /var/lib/apt/lists/*
-          sudo rm -rf /tmp/*
+          echo "🔍 Scanning for packages to build..."
           
-          # Show available space
+          if [ ! -d "packages" ]; then
+            echo "❌ Packages directory not found"
+            echo "packages-found=false" >> $GITHUB_OUTPUT
+            echo "total-packages=0" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          PACKAGE_COUNT=0
+          PACKAGE_LIST=""
+          
+          echo "📋 Available packages:"
+          for makefile in $(find packages/ -name 'Makefile' 2>/dev/null); do
+            pkg_dir=$(dirname "$makefile")
+            pkg_name=$(basename "$pkg_dir")
+            echo "  📦 $pkg_name"
+            PACKAGE_LIST="$PACKAGE_LIST $pkg_name"
+            PACKAGE_COUNT=$((PACKAGE_COUNT + 1))
+          done
+          
+          if [ $PACKAGE_COUNT -eq 0 ]; then
+            echo "❌ No packages with Makefile found"
+            echo "packages-found=false" >> $GITHUB_OUTPUT
+          else
+            echo "✅ Found $PACKAGE_COUNT packages to build"
+            echo "packages-found=true" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "total-packages=$PACKAGE_COUNT" >> $GITHUB_OUTPUT
+          echo "PACKAGES_TO_BUILD=$PACKAGE_LIST" >> $GITHUB_ENV
+
+      - name: 🎯 Generate Build Matrix
+        id: set-matrix
+        run: |
+          # Base matrix
+          ARCHS='["aarch64_cortex-a53", "aarch64_cortex-a72", "aarch64_cortex-a76", "aarch64_generic", "x86_64"]'
+          BRANCHES='["openwrt-23.05", "openwrt-24.10", "SNAPSHOT"]'
+          
+          # Apply manual selections if provided
+          if [ -n "${{ github.event.inputs.target_arch }}" ]; then
+            ARCHS='["${{ github.event.inputs.target_arch }}"]'
+          fi
+          
+          if [ -n "${{ github.event.inputs.target_branch }}" ]; then
+            BRANCHES='["${{ github.event.inputs.target_branch }}"]'
+          fi
+          
+          # Generate exclusions
+          EXCLUDE='[{"arch": "aarch64_cortex-a76", "branch": "openwrt-23.05"}]'
+          
+          MATRIX=$(jq -n \
+            --argjson archs "$ARCHS" \
+            --argjson branches "$BRANCHES" \
+            --argjson exclude "$EXCLUDE" \
+            '{arch: $archs, branch: $branches, exclude: $exclude}')
+          
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "🎯 Build matrix generated:"
+          echo "$MATRIX" | jq '.'
+
+  build:
+    name: 🔨 Build ${{ matrix.arch }}-${{ matrix.branch }}
+    runs-on: ubuntu-latest
+    needs: prepare
+    if: needs.prepare.outputs.packages-found == 'true'
+    continue-on-error: true
+    
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+
+    steps:
+      - name: 📂 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🧹 Free Disk Space
+        run: |
+          echo "🧹 Cleaning up disk space..."
+          
+          # Show initial space
+          echo "📊 Initial disk usage:"
+          df -h
+          
+          # Remove unnecessary packages
+          sudo apt-get remove -y --purge \
+            man-db \
+            apache2* \
+            mysql* \
+            postgresql* \
+            mono-* \
+            firefox \
+            google-chrome-stable \
+            dotnet* \
+            powershell \
+            azure-cli \
+            google-cloud-sdk
+          
+          sudo apt-get autoremove -y
+          sudo apt-get clean
+          
+          # Remove large directories
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /usr/local/share/boost \
+            /usr/share/swift \
+            /var/lib/apt/lists/* \
+            /tmp/* \
+            /opt/hostedtoolcache \
+            /usr/local/lib/android \
+            /usr/local/share/powershell \
+            /usr/share/dotnet \
+            /opt/az
+          
+          # Show final space
+          echo "📊 Available space after cleanup:"
           df -h
 
-      - name: Prepare build environment
+      - name: 🏗️ Prepare Build Environment
         run: |
+          echo "🏗️ Setting up build environment for ${{ matrix.arch }}-${{ matrix.branch }}..."
+          
           # Create necessary directories
           mkdir -p staging_dir host_dir
           
-          # Ensure proper permissions for workspace
+          # Set proper permissions
           sudo chown -R $USER:$USER ${{ github.workspace }}
           
-          # Verify packages directory exists
+          # Verify packages directory
           if [ ! -d "${{ github.workspace }}/packages" ]; then
-            echo "❌ Packages directory not found at ${{ github.workspace }}/packages"
-            echo "Available directories:"
-            ls -la ${{ github.workspace }}/
-            mkdir -p ${{ github.workspace }}/packages
-            echo "Created empty packages directory"
+            echo "❌ Packages directory not found!"
+            exit 1
           fi
           
-          echo "✅ Packages directory found"
-          echo "Contents:"
-          ls -la ${{ github.workspace }}/packages/ || echo "Directory is empty"
+          echo "✅ Packages directory verified"
+          echo "📦 Package contents:"
+          find packages/ -name 'Makefile' -exec dirname {} \; | sort
           
-          # Find and list packages to build
-          if [ -d "packages" ]; then
-            echo "=== Scanning for packages ==="
-            PACKAGE_LIST=""
-            for makefile in $(find packages/ -name 'Makefile' 2>/dev/null); do
-              pkg_dir=$(dirname "$makefile")
-              pkg_name=$(basename "$pkg_dir")
-              echo "Found package: $pkg_name"
-              PACKAGE_LIST="$PACKAGE_LIST $pkg_name"
-            done
-            
-            if [ -n "$PACKAGE_LIST" ]; then
-              echo "Packages to build:$PACKAGE_LIST"
-              echo "PACKAGES_TO_BUILD=$PACKAGE_LIST" >> $GITHUB_ENV
-            else
-              echo "No packages found with Makefile"
-              echo "PACKAGES_TO_BUILD=" >> $GITHUB_ENV
-            fi
+          # Set environment variables
+          echo "BUILD_ARCH=${{ matrix.arch }}" >> $GITHUB_ENV
+          echo "BUILD_BRANCH=${{ matrix.branch }}" >> $GITHUB_ENV
+          echo "BUILD_TIMESTAMP=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
+          
+          # Determine package format
+          if [[ "${{ matrix.branch }}" == "SNAPSHOT" ]]; then
+            echo "PKG_FORMAT=apk" >> $GITHUB_ENV
+            echo "PKG_EXT=apk" >> $GITHUB_ENV
           else
-            echo "PACKAGES_TO_BUILD=" >> $GITHUB_ENV
+            echo "PKG_FORMAT=ipk" >> $GITHUB_ENV
+            echo "PKG_EXT=ipk" >> $GITHUB_ENV
           fi
 
-      - name: Build packages
+      - name: 🔨 Build Packages
         uses: openwrt/gh-action-sdk@main
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.branch }}
           FEEDNAME: packages_custom
-          NO_REFRESH_CHECK: 1
 
-      - name: Check build results
+      - name: 🔍 Analyze Build Results
+        id: analyze-build
         run: |
-          echo "=== Build completed for ${{ matrix.arch }}-${{ matrix.branch }} ==="
+          echo "🔍 Analyzing build results for ${{ matrix.arch }}-${{ matrix.branch }}..."
           
-          # Show what we have after build
-          echo "=== Workspace contents after build ==="
-          find . -maxdepth 3 -type d | sort
-          
-          # Fix permissions after build
+          # Fix permissions
           sudo chown -R $USER:$USER ${{ github.workspace }} || true
           
-          echo "Checking for built packages..."
+          # Initialize counters
+          PACKAGES_BUILT=0
+          PACKAGES_FAILED=0
+          BUILD_SUCCESS=false
           
-          # Determine package extension based on branch
-          if [[ "${{ matrix.branch }}" == "SNAPSHOT" ]]; then
-            PKG_EXT="apk"
-          else
-            PKG_EXT="ipk"
-          fi
+          echo "🔎 Searching for .${{ env.PKG_EXT }} packages..."
           
-          echo "Looking for .$PKG_EXT files..."
+          # Search in common locations
+          SEARCH_PATHS=(
+            "bin/packages/${{ matrix.arch }}/packages_custom"
+            "bin/packages/${{ matrix.arch }}"
+            "staging_dir/packages/${{ matrix.arch }}"
+            "openwrt/bin/packages/${{ matrix.arch }}/packages_custom"
+            "openwrt/bin/packages/${{ matrix.arch }}"
+          )
           
-          # Look for packages in common locations
-          PACKAGE_FOUND=false
-          PACKAGE_COUNT=0
+          # Add dynamic paths
+          SEARCH_PATHS+=($(find . -path "*/bin/packages/*" -type d 2>/dev/null | head -10))
           
-          # Standard OpenWrt SDK locations
-          for search_dir in \
-            "bin/packages/${{ matrix.arch }}/packages_custom" \
-            "bin/packages/${{ matrix.arch }}" \
-            "staging_dir/packages/${{ matrix.arch }}" \
-            "openwrt/bin/packages/${{ matrix.arch }}/packages_custom" \
-            "openwrt/bin/packages/${{ matrix.arch }}" \
-            $(find . -path "*/bin/packages/*" -type d 2>/dev/null | head -10); do
-            
+          for search_dir in "${SEARCH_PATHS[@]}"; do
             if [ -d "$search_dir" ]; then
-              echo "Checking directory: $search_dir"
-              ls -la "$search_dir" || true
+              echo "📁 Checking: $search_dir"
               
-              if find "$search_dir" -name "*.$PKG_EXT" 2>/dev/null | head -1 >/dev/null; then
-                echo "✅ Packages found in: $search_dir"
-                PACKAGES=$(find "$search_dir" -name "*.$PKG_EXT" 2>/dev/null)
-                echo "$PACKAGES"
-                PACKAGE_COUNT=$(echo "$PACKAGES" | wc -l)
-                PACKAGE_FOUND=true
+              PKG_COUNT=$(find "$search_dir" -name "*.${{ env.PKG_EXT }}" 2>/dev/null | wc -l)
+              if [ $PKG_COUNT -gt 0 ]; then
+                echo "✅ Found $PKG_COUNT packages in: $search_dir"
+                PACKAGES_BUILT=$PKG_COUNT
+                BUILD_SUCCESS=true
                 
-                # Ensure standard location exists and copy packages there
+                # Ensure standard location and copy packages
                 mkdir -p "bin/packages/${{ matrix.arch }}/packages_custom"
-                find "$search_dir" -name "*.$PKG_EXT" -exec cp -v {} "bin/packages/${{ matrix.arch }}/packages_custom/" \; 2>/dev/null || true
+                find "$search_dir" -name "*.${{ env.PKG_EXT }}" -exec cp -v {} "bin/packages/${{ matrix.arch }}/packages_custom/" \; 2>/dev/null || true
                 find "$search_dir" -name "Packages*" -exec cp -v {} "bin/packages/${{ matrix.arch }}/packages_custom/" \; 2>/dev/null || true
+                
+                # List built packages
+                echo "📦 Built packages:"
+                find "bin/packages/${{ matrix.arch }}/packages_custom" -name "*.${{ env.PKG_EXT }}" -exec basename {} \; | sort
                 break
               fi
             fi
           done
           
-          if [ "$PACKAGE_FOUND" = false ]; then
-            echo "❌ No .$PKG_EXT packages found"
-            echo "=== Searching for any package files ==="
-            find . -name "*.$PKG_EXT" -type f 2>/dev/null | head -20 || echo "No package files found anywhere"
+          # Check for build failures
+          if [ "$BUILD_SUCCESS" = false ]; then
+            echo "❌ No packages built successfully"
             
-            echo "=== Looking for build errors ==="
-            find . -name "*.log" -exec echo "=== {} ===" \; -exec tail -30 {} \; 2>/dev/null | head -100
+            echo "🔍 Searching for build logs..."
+            find . -name "*.log" -type f 2>/dev/null | head -10 | while read logfile; do
+              echo "📄 Log: $logfile"
+              echo "--- Last 20 lines ---"
+              tail -20 "$logfile" 2>/dev/null || true
+              echo "---"
+            done
             
-            echo "=== Directory structure ==="
-            find . -type d -name "*bin*" -o -name "*package*" | head -20
-          else
-            echo "✅ Successfully found $PACKAGE_COUNT packages"
-            echo "Final package location contents:"
-            ls -la "bin/packages/${{ matrix.arch }}/packages_custom/" || true
+            # Count failed packages from logs
+            PACKAGES_FAILED=$(find packages/ -name 'Makefile' | wc -l)
           fi
+          
+          # Output results
+          echo "packages-built=$PACKAGES_BUILT" >> $GITHUB_OUTPUT
+          echo "packages-failed=$PACKAGES_FAILED" >> $GITHUB_OUTPUT
+          echo "build-success=$BUILD_SUCCESS" >> $GITHUB_OUTPUT
+          
+          echo "📊 Build Summary:"
+          echo "  ✅ Packages built: $PACKAGES_BUILT"
+          echo "  ❌ Packages failed: $PACKAGES_FAILED"
+          echo "  🎯 Build success: $BUILD_SUCCESS"
 
-      - name: Store packages
+      - name: 📦 Package Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: packages-${{ matrix.branch }}-${{ matrix.arch }}
@@ -187,9 +308,44 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+      - name: 📊 Build Summary
+        run: |
+          echo "# 🔨 Build Summary: ${{ matrix.arch }}-${{ matrix.branch }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎯 **Architecture** | \`${{ matrix.arch }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🌿 **Branch** | \`${{ matrix.branch }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📦 **Package Format** | \`${{ env.PKG_FORMAT }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| ✅ **Packages Built** | \`${{ steps.analyze-build.outputs.packages-built }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| ❌ **Packages Failed** | \`${{ steps.analyze-build.outputs.packages-failed }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🏆 **Build Status** | $([ "${{ steps.analyze-build.outputs.build-success }}" = "true" ] && echo "✅ **SUCCESS**" || echo "❌ **FAILED**") |" >> $GITHUB_STEP_SUMMARY
+
+  build-summary:
+    name: 📊 Build Summary
+    runs-on: ubuntu-latest
+    needs: [prepare, build]
+    if: always() && needs.prepare.outputs.packages-found == 'true'
+    
+    steps:
+      - name: 📊 Generate Overall Summary
+        run: |
+          echo "# 📊 OpenWrt Packages Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎯 Build Information" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 📅 **Build Date** | \`$(date +'%Y-%m-%d %H:%M:%S UTC')\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔗 **Commit** | [\`${GITHUB_SHA:0:7}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}) |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🌿 **Branch** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📦 **Total Packages** | \`${{ needs.prepare.outputs.total-packages }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🚀 **Trigger** | \`${{ github.event_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
   deploy:
-    name: Deploy ${{ matrix.branch }} packages
-    needs: build
+    name: 🚀 Deploy ${{ matrix.branch }} Packages
+    needs: [prepare, build]
+    if: always() && needs.prepare.outputs.packages-found == 'true'
     runs-on: ubuntu-latest
     
     strategy:
@@ -200,130 +356,141 @@ jobs:
           - SNAPSHOT
 
     steps:
-      - name: Checkout
+      - name: 📂 Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download all artifacts for ${{ matrix.branch }}
+      - name: ⬇️ Download Build Artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: packages-${{ matrix.branch }}-*
           path: downloads/
           merge-multiple: false
 
-      - name: Organize packages
+      - name: 🗂️ Organize Package Repository
+        id: organize
         run: |
+          echo "🗂️ Organizing packages for ${{ matrix.branch }}..."
+          
           mkdir -p releases/${{ matrix.branch }}
           cd downloads
-          
-          echo "Processing artifacts for ${{ matrix.branch }}..."
-          echo "Available artifact directories:"
-          ls -la
-          
-          # Determine package extension
-          if [[ "${{ matrix.branch }}" == "SNAPSHOT" ]]; then
-            PKG_EXT="apk"
-          else
-            PKG_EXT="ipk"
-          fi
-          
-          for dir in packages-${{ matrix.branch }}-*/; do
-            if [ -d "$dir" ]; then
-              arch=$(echo "$dir" | sed 's/packages-${{ matrix.branch }}-\(.*\)\//\1/')
-              echo "Processing architecture: $arch"
-              
-              mkdir -p "../releases/${{ matrix.branch }}/$arch"
-              
-              # Look for packages in artifact
-              FOUND_PACKAGES=false
-              
-              # Check multiple possible paths within artifact
-              for search_path in \
-                "$dir/bin/packages/$arch/packages_custom" \
-                "$dir/bin/packages/$arch" \
-                "$dir/staging_dir/packages/$arch" \
-                $(find "$dir" -type d -name "*packages*" 2>/dev/null); do
-                
-                if [ -d "$search_path" ] && find "$search_path" -name "*.$PKG_EXT" 2>/dev/null | head -1 >/dev/null; then
-                  echo "Found .$PKG_EXT files in: $search_path"
-                  find "$search_path" -name "*.$PKG_EXT" -exec cp {} "../releases/${{ matrix.branch }}/$arch/" \; 2>/dev/null
-                  FOUND_PACKAGES=true
-                fi
-              done
-              
-              # Copy package index files
-              find "$dir" -name "Packages*" -exec cp {} "../releases/${{ matrix.branch }}/$arch/" \; 2>/dev/null || true
-              
-              if [ "$FOUND_PACKAGES" = true ]; then
-                COPIED_COUNT=$(find "../releases/${{ matrix.branch }}/$arch/" -name "*.$PKG_EXT" 2>/dev/null | wc -l)
-                echo "✅ Copied $COPIED_COUNT packages for $arch"
-              else
-                echo "⚠️ No .$PKG_EXT packages found for $arch"
-              fi
-            fi
-          done
-          
-          echo "=== Final organization results ==="
-          TOTAL_PACKAGES=$(find "../releases/${{ matrix.branch }}/" -name "*.$PKG_EXT" 2>/dev/null | wc -l)
-          echo "Total packages organized: $TOTAL_PACKAGES"
-
-      - name: Generate package index
-        run: |
-          cd releases/${{ matrix.branch }}
           
           # Determine package format
           if [[ "${{ matrix.branch }}" == "SNAPSHOT" ]]; then
             PKG_EXT="apk"
+            PKG_FORMAT="APK"
           else
             PKG_EXT="ipk"
+            PKG_FORMAT="IPK"
           fi
+          
+          echo "PKG_EXT=$PKG_EXT" >> $GITHUB_ENV
+          echo "PKG_FORMAT=$PKG_FORMAT" >> $GITHUB_ENV
+          
+          TOTAL_PACKAGES=0
+          TOTAL_ARCHS=0
+          
+          echo "📋 Processing artifacts:"
+          ls -la
+          
+          for dir in packages-${{ matrix.branch }}-*/; do
+            if [ -d "$dir" ]; then
+              arch=$(echo "$dir" | sed 's/packages-${{ matrix.branch }}-\(.*\)\//\1/')
+              echo "🏗️ Processing architecture: $arch"
+              
+              mkdir -p "../releases/${{ matrix.branch }}/$arch"
+              
+              # Search for packages in artifact
+              ARCH_PACKAGES=0
+              SEARCH_PATHS=(
+                "$dir/bin/packages/$arch/packages_custom"
+                "$dir/bin/packages/$arch"
+                "$dir/staging_dir/packages/$arch"
+              )
+              
+              # Add dynamic paths
+              SEARCH_PATHS+=($(find "$dir" -type d -name "*packages*" 2>/dev/null))
+              
+              for search_path in "${SEARCH_PATHS[@]}"; do
+                if [ -d "$search_path" ]; then
+                  PKG_COUNT=$(find "$search_path" -name "*.$PKG_EXT" 2>/dev/null | wc -l)
+                  if [ $PKG_COUNT -gt 0 ]; then
+                    echo "📦 Found $PKG_COUNT packages in: $search_path"
+                    find "$search_path" -name "*.$PKG_EXT" -exec cp {} "../releases/${{ matrix.branch }}/$arch/" \; 2>/dev/null
+                    ARCH_PACKAGES=$((ARCH_PACKAGES + PKG_COUNT))
+                  fi
+                fi
+              done
+              
+              # Copy index files
+              find "$dir" -name "Packages*" -exec cp {} "../releases/${{ matrix.branch }}/$arch/" \; 2>/dev/null || true
+              find "$dir" -name "APKINDEX*" -exec cp {} "../releases/${{ matrix.branch }}/$arch/" \; 2>/dev/null || true
+              
+              if [ $ARCH_PACKAGES -gt 0 ]; then
+                echo "✅ Organized $ARCH_PACKAGES packages for $arch"
+                TOTAL_PACKAGES=$((TOTAL_PACKAGES + ARCH_PACKAGES))
+                TOTAL_ARCHS=$((TOTAL_ARCHS + 1))
+              else
+                echo "⚠️ No packages found for $arch"
+                rmdir "../releases/${{ matrix.branch }}/$arch" 2>/dev/null || true
+              fi
+            fi
+          done
+          
+          echo "📊 Organization complete:"
+          echo "  🏗️ Architectures: $TOTAL_ARCHS"
+          echo "  📦 Total packages: $TOTAL_PACKAGES"
+          
+          echo "total-packages=$TOTAL_PACKAGES" >> $GITHUB_OUTPUT
+          echo "total-archs=$TOTAL_ARCHS" >> $GITHUB_OUTPUT
+
+      - name: 📋 Generate Package Indexes
+        run: |
+          echo "📋 Generating package indexes for ${{ matrix.branch }}..."
+          
+          cd releases/${{ matrix.branch }}
           
           for arch_dir in */; do
             if [ -d "$arch_dir" ]; then
               arch=$(basename "$arch_dir")
-              echo "Processing index for $arch"
+              echo "📝 Creating index for $arch"
               
               cd "$arch_dir"
               
-              # Check if we have packages
-              if ls *.$PKG_EXT 1> /dev/null 2>&1; then
-                echo "Generating package index for $arch"
-                
-                # Remove existing index
-                rm -f Packages Packages.gz Packages.sig
-                
-                # Generate new index for IPK format
-                if [ "$PKG_EXT" = "ipk" ]; then
-                  # Use opkg-utils if available, otherwise create basic index
+              if ls *.${{ env.PKG_EXT }} 1> /dev/null 2>&1; then
+                if [ "${{ env.PKG_EXT }}" = "ipk" ]; then
+                  # Generate IPK index
                   {
-                    for pkg in *.$PKG_EXT; do
+                    for pkg in *.${{ env.PKG_EXT }}; do
                       if [ -f "$pkg" ]; then
-                        pkg_name=$(basename "$pkg" .$PKG_EXT | sed 's/_[^_]*$//')
-                        version=$(basename "$pkg" .$PKG_EXT | sed 's/.*_\([^_]*\)_[^_]*$/\1/')
+                        # Extract package info
+                        pkg_base=$(basename "$pkg" .${{ env.PKG_EXT }})
+                        pkg_name=$(echo "$pkg_base" | sed 's/_[^_]*_[^_]*$//')
+                        pkg_version=$(echo "$pkg_base" | sed 's/.*_\([^_]*\)_[^_]*$/\1/')
+                        pkg_arch=$(echo "$pkg_base" | sed 's/.*_[^_]*_\([^_]*\)$/\1/')
                         
                         echo "Package: $pkg_name"
-                        echo "Version: ${version:-1.0.0}"
-                        echo "Architecture: $arch"
+                        echo "Version: ${pkg_version:-1.0.0}"
+                        echo "Architecture: ${pkg_arch:-$arch}"
                         echo "Filename: $pkg"
                         echo "Size: $(stat -c%s "$pkg")"
                         echo "SHA256sum: $(sha256sum "$pkg" | cut -d' ' -f1)"
-                        echo "Description: Custom OpenWrt package"
-                        echo "Maintainer: GitHub Actions"
+                        echo "Description: Custom OpenWrt package - $pkg_name"
+                        echo "Maintainer: GitHub Actions <action@github.com>"
+                        echo "Source: https://github.com/${{ github.repository }}"
                         echo ""
                       fi
                     done
                   } > Packages
                   
-                  # Create compressed version
                   gzip -k Packages
-                  
-                  echo "✅ Generated IPK index for $arch ($(ls *.$PKG_EXT | wc -l) packages)"
+                  echo "✅ Generated IPK index for $arch"
                 else
-                  # APK format - create APKINDEX
+                  # Generate APK index
                   {
-                    for pkg in *.$PKG_EXT; do
+                    for pkg in *.${{ env.PKG_EXT }}; do
                       if [ -f "$pkg" ]; then
                         pkg_name=$(basename "$pkg" .apk | sed 's/-[0-9].*$//')
                         
@@ -331,116 +498,155 @@ jobs:
                         echo "V:1.0.0-r1"
                         echo "A:$arch"
                         echo "S:$(stat -c%s "$pkg")"
-                        echo "T:Custom OpenWrt package"
+                        echo "T:Custom OpenWrt package - $pkg_name"
                         echo "U:https://github.com/${{ github.repository }}"
-                        echo "L:GPL"
+                        echo "L:GPL-2.0"
                         echo "o:$pkg_name"
                         echo "m:GitHub Actions"
                         echo "t:$(date +%s)"
-                        echo "c:$(sha1sum "$pkg" | cut -d' ' -f1)"
+                        echo "c:$(sha256sum "$pkg" | cut -d' ' -f1)"
                         echo ""
                       fi
                     done
                   } > APKINDEX
                   
-                  echo "✅ Generated APK index for $arch ($(ls *.$PKG_EXT | wc -l) packages)"
+                  echo "✅ Generated APK index for $arch"
                 fi
-              else
-                echo "⚠️ No packages found for $arch"
               fi
               
               cd ..
             fi
           done
 
-      - name: Create release info
+      - name: 📄 Create Repository Documentation
         run: |
+          echo "📄 Creating repository documentation for ${{ matrix.branch }}..."
+          
           cd releases/${{ matrix.branch }}
           
-          # Determine format info
+          # Determine format-specific information
           if [[ "${{ matrix.branch }}" == "SNAPSHOT" ]]; then
-            FORMAT="APK (Alpine Package Keeper)"
+            FORMAT_NAME="APK (Alpine Package Keeper)"
             REPO_FILE="/etc/apk/repositories"
             UPDATE_CMD="apk update"
-            INSTALL_SYNTAX="apk add"
+            INSTALL_CMD="apk add"
+            PKG_ICON="📦"
           else
-            FORMAT="IPK (Itsy Package)"
+            FORMAT_NAME="IPK (Itsy Package)"
             REPO_FILE="/etc/opkg/customfeeds.conf"
             UPDATE_CMD="opkg update"
-            INSTALL_SYNTAX="opkg install"
+            INSTALL_CMD="opkg install"
+            PKG_ICON="📦"
           fi
           
           cat > README.md << EOF
-          # OpenWrt Packages - ${{ matrix.branch }}
-
-          Built: $(date -u '+%Y-%m-%d %H:%M:%S UTC')  
-          Commit: [\`${GITHUB_SHA:0:7}\`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})  
-          Branch: ${{ github.ref_name }}  
-
-          ## Package Format
-          **Format**: $FORMAT
-
-          ## Installation
-
-          ### Method 1: Add Repository
+          # 🚀 OpenWrt Custom Packages - ${{ matrix.branch }}
+          
+          ![Build Status](https://img.shields.io/github/actions/workflow/status/${{ github.repository }}/build.yml?branch=${{ github.ref_name }}&label=Build&logo=github)
+          ![Last Updated](https://img.shields.io/badge/Last%20Updated-$(date -u '+%Y---%m---%d')-blue?logo=calendar)
+          ![Total Packages](https://img.shields.io/badge/Total%20Packages-${{ steps.organize.outputs.total-packages }}-green?logo=package)
+          
+          ## 📋 Repository Information
+          
+          | Item | Details |
+          |------|---------|
+          | 🏗️ **Built** | $(date -u '+%Y-%m-%d %H:%M:%S UTC') |
+          | 📝 **Commit** | [\`${GITHUB_SHA:0:7}\`](https://github.com/${{ github.repository }}/commit/${{ github.sha }}) |
+          | 🌿 **Branch** | \`${{ github.ref_name }}\` |
+          | 📦 **Format** | $FORMAT_NAME |
+          | 🏗️ **Architectures** | ${{ steps.organize.outputs.total-archs }} |
+          | 📦 **Total Packages** | ${{ steps.organize.outputs.total-packages }} |
+          
+          ## 🚀 Quick Installation
+          
+          ### Method 1: 📡 Add Repository Feed
           \`\`\`bash
-          # Add custom feed
+          # Add custom package feed
           echo "src/gz packages_custom https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/${{ matrix.branch }}/[ARCH]" >> $REPO_FILE
-
-          # Update package lists
+          
+          # Update package database
           $UPDATE_CMD
-
-          # Install package
-          $INSTALL_SYNTAX [PACKAGE_NAME]
+          
+          # Install any package
+          $INSTALL_CMD [PACKAGE_NAME]
           \`\`\`
-
-          ### Method 2: Direct Download
+          
+          ### Method 2: 📥 Direct Download & Install
           \`\`\`bash
           # Download package directly
           wget "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/${{ matrix.branch }}/[ARCH]/[PACKAGE_FILE]"
-
+          
           # Install downloaded package
-          $INSTALL_SYNTAX ./[PACKAGE_FILE]
+          $INSTALL_CMD ./[PACKAGE_FILE]
           \`\`\`
-
-          Replace:
-          - \`[ARCH]\` with your device architecture  
-          - \`[PACKAGE_NAME]\` with the desired package name
-          - \`[PACKAGE_FILE]\` with the actual package filename
-
-          ## Available Architectures
-
+          
+          ## 🏗️ Available Architectures
+          
           EOF
           
-          total_packages=0
+          # List architectures and packages
           for arch_dir in */; do
             if [ -d "$arch_dir" ]; then
               arch=$(basename "$arch_dir")
-              
-              if [[ "${{ matrix.branch }}" == "SNAPSHOT" ]]; then
-                count=$(find "$arch_dir" -name "*.apk" 2>/dev/null | wc -l)
-              else
-                count=$(find "$arch_dir" -name "*.ipk" 2>/dev/null | wc -l)
-              fi
+              count=$(find "$arch_dir" -name "*.${{ env.PKG_EXT }}" 2>/dev/null | wc -l)
               
               if [ "$count" -gt 0 ]; then
-                echo "- **$arch** ($count packages)" >> README.md
-                total_packages=$((total_packages + count))
-                
-                # List available packages
-                echo "  - Packages: \`$(find "$arch_dir" -name "*.*pk" -exec basename {} \; | sort | tr '\n' ' ')\`" >> README.md
+                echo "### 🎯 $arch ($count packages)" >> README.md
+                echo "" >> README.md
+                echo "\`\`\`" >> README.md
+                echo "Repository URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/${{ matrix.branch }}/$arch" >> README.md
+                echo "\`\`\`" >> README.md
+                echo "" >> README.md
+                echo "**📦 Available Packages:**" >> README.md
+                find "$arch_dir" -name "*.${{ env.PKG_EXT }}" -exec basename {} \; | sort | sed 's/^/- `/' | sed 's/$/`/' >> README.md
+                echo "" >> README.md
               fi
             fi
           done
           
-          echo "" >> README.md
-          echo "**Total: $total_packages packages across all architectures**" >> README.md
+          cat >> README.md << EOF
+          
+          ## 🔧 Usage Examples
+          
+          \`\`\`bash
+          # Example: Install a specific package for x86_64
+          echo "src/gz packages_custom https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/${{ matrix.branch }}/x86_64" >> $REPO_FILE
+          $UPDATE_CMD
+          $INSTALL_CMD your-package-name
+          \`\`\`
+          
+          ## 🆘 Support & Issues
+          
+          - 📋 **Repository**: [GitHub Repository](https://github.com/${{ github.repository }})
+          - 🐛 **Report Issues**: [GitHub Issues](https://github.com/${{ github.repository }}/issues)
+          - 📖 **Documentation**: [OpenWrt Wiki](https://openwrt.org/docs/guide-user/additional-software/opkg)
+          
+          ---
+          
+          🤖 *Automatically built and deployed using GitHub Actions*
+          EOF
 
-      - name: Deploy to GitHub Pages
+      - name: 🌐 Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./releases
           destination_dir: .
           keep_files: true
-          commit_message: "Update ${{ matrix.branch }} packages - $(date '+%Y-%m-%d %H:%M:%S')"
+          commit_message: "🚀 Deploy ${{ matrix.branch }} packages - $(date '+%Y-%m-%d %H:%M:%S')"
+          user_name: 'GitHub Actions Bot'
+          user_email: 'action@github.com'
+
+      - name: 📊 Deployment Summary
+        run: |
+          echo "# 🚀 Deployment Summary: ${{ matrix.branch }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🌿 **Branch** | \`${{ matrix.branch }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📦 **Format** | \`${{ env.PKG_FORMAT }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🏗️ **Architectures** | \`${{ steps.organize.outputs.total-archs }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📦 **Total Packages** | \`${{ steps.organize.outputs.total-packages }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🌐 **Repository URL** | [View Repository](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/${{ matrix.branch }}) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Successfully deployed ${{ matrix.branch }} packages to GitHub Pages!**" >> $GITHUB_STEP_SUMMARY
