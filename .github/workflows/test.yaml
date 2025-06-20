@@ -1,12 +1,17 @@
-name: build-packages
+name: Build and Release OpenWRT Packages
 
 on:
   workflow_dispatch:
 
+env:
+  RETENTION_DAYS: 7
+  BUILD_TIMEOUT_MIN: 120
+
 jobs:
   build:
-    name: ${{ matrix.arch }}-${{ matrix.branch }} release
+    name: Build ${{ matrix.arch }} (${{ matrix.branch }})
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ env.BUILD_TIMEOUT_MIN }}
     continue-on-error: true
     strategy:
       fail-fast: false
@@ -47,47 +52,72 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup build environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses5-dev zlib1g-dev gawk git gettext libssl-dev xsltproc wget unzip python3
+
       - name: Build packages with OpenWRT SDK
         uses: openwrt/gh-action-sdk@main
         env:
-          ARCH: ${{ matrix.arch }}-${{ matrix.branch }}
+          ARCH: ${{ matrix.arch }}
+          BRANCH: ${{ matrix.branch }}
           FEEDNAME: custom_packages
           FEED_DIR: ./packages/
           INDEX: 1
           NO_REFRESH_CHECK: true
 
-      - name: Organize and compress packages
+      - name: Verify build artifacts
         run: |
-          # Create directory structure for releases branch
-          mkdir -p releases/${{ matrix.branch }}/${{ matrix.arch }}
+          if [ ! -d "bin/packages/${{ matrix.arch }}/custom_packages" ]; then
+            echo "::warning::No packages were built for ${{ matrix.arch }} (${{ matrix.branch }})"
+            exit 0
+          fi
+
+      - name: Organize packages
+        run: |
+          # Create structured output directory
+          OUTPUT_DIR="releases/${{ matrix.branch }}/${{ matrix.arch }}"
+          mkdir -p "$OUTPUT_DIR"
           
-          # Copy all built packages (IPK and APK files)
+          # Copy packages with verification
           if [ -d "bin/packages/${{ matrix.arch }}/custom_packages" ]; then
-            cp -r bin/packages/${{ matrix.arch }}/custom_packages/* releases/${{ matrix.branch }}/${{ matrix.arch }}/
+            rsync -av --ignore-missing-args \
+              "bin/packages/${{ matrix.arch }}/custom_packages/" \
+              "$OUTPUT_DIR/"
           fi
           
-          # Create compressed archive for upload
-          tar -czf packages_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz -C releases/${{ matrix.branch }}/${{ matrix.arch }} .
-          
-          # List contents for verification
-          echo "Built packages for ${{ matrix.arch }}-${{ matrix.branch }}:"
-          ls -la releases/${{ matrix.branch }}/${{ matrix.arch }}/
+          # Generate simple manifest
+          {
+            echo "# Package Manifest"
+            echo "Architecture: ${{ matrix.arch }}"
+            echo "OpenWRT Version: ${{ matrix.branch }}"
+            echo "Build Date: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo ""
+            echo "## Packages"
+            find "$OUTPUT_DIR" -type f -name '*.ipk' -o -name '*.apk' | sort | sed 's|.*/||'
+          } > "$OUTPUT_DIR/MANIFEST.md"
 
-      - name: Upload build artifacts
+      - name: Create compressed archive
+        run: |
+          tar -czf "packages_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz" \
+            -C "releases/${{ matrix.branch }}/${{ matrix.arch }}" .
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: packages_${{ matrix.arch }}-${{ matrix.branch }}
           path: |
             releases/${{ matrix.branch }}/${{ matrix.arch }}/*
             packages_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz
-          retention-days: 7
+          retention-days: ${{ env.RETENTION_DAYS }}
 
-  upload-to-releases:
+  release:
+    name: Publish Packages
     needs: build
-    name: 📦 Upload to Releases Branch
     runs-on: ubuntu-latest
     if: always() && (needs.build.result == 'success' || needs.build.result == 'failure')
-
+    
     steps:
       - name: Checkout releases branch
         uses: actions/checkout@v4
@@ -98,178 +128,119 @@ jobs:
 
       - name: Configure Git
         run: |
-          git config --global user.email "action@github.com"
-          git config --global user.name "GitHub Action"
+          git config --global user.email "actions@github.com"
+          git config --global user.name "OpenWRT Package Builder"
+          git config --global pull.rebase true
 
-      - name: Download all build artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: packages_*
           path: artifacts
 
-      - name: Organize packages by architecture and version
+      - name: Process artifacts
         run: |
-          # Create base directory structure
+          # Create base directory
           mkdir -p packages
           
           # Process each artifact
-          for artifact_dir in artifacts/packages_*; do
-            if [ -d "$artifact_dir" ]; then
-              artifact_name=$(basename "$artifact_dir")
-              
-              # Extract arch and branch from artifact name (packages_ARCH-BRANCH)
-              arch_branch=${artifact_name#packages_}
+          for artifact in artifacts/packages_*; do
+            if [ -d "$artifact" ]; then
+              # Extract arch and branch from artifact name
+              name=$(basename "$artifact")
+              arch_branch=${name#packages_}
               arch=${arch_branch%-*}
               branch=${arch_branch##*-}
               
-              echo "Processing: $artifact_name -> arch: $arch, branch: $branch"
+              echo "Processing: $name (arch: $arch, branch: $branch)"
               
-              # Create target directory structure
+              # Create target directory
               target_dir="packages/$branch/$arch"
               mkdir -p "$target_dir"
               
-              # Copy packages to organized structure
-              if [ -d "$artifact_dir/releases/$branch/$arch" ]; then
-                cp -r "$artifact_dir"/releases/$branch/$arch/* "$target_dir/" 2>/dev/null || true
+              # Copy packages
+              if [ -d "$artifact/releases/$branch/$arch" ]; then
+                rsync -av --ignore-missing-args \
+                  "$artifact/releases/$branch/$arch/" \
+                  "$target_dir/"
               fi
               
-              # Also check for direct package files in artifact
-              find "$artifact_dir" -name "*.ipk" -o -name "*.apk" | while read -r file; do
-                if [ -f "$file" ]; then
-                  cp "$file" "$target_dir/"
-                fi
-              done
-            fi
-          done
-          
-          # Show final structure
-          echo "Final package structure:"
-          find packages -type f -name "*.ipk" -o -name "*.apk" | sort
-
-      - name: Generate package index
-        run: |
-          # Generate index files for each architecture/branch combination
-          for branch_dir in packages/*/; do
-            if [ -d "$branch_dir" ]; then
-              branch=$(basename "$branch_dir")
-              for arch_dir in "$branch_dir"*/; do
-                if [ -d "$arch_dir" ]; then
-                  arch=$(basename "$arch_dir")
-                  
-                  # Create Packages index file
-                  cd "$arch_dir"
-                  
-                  # Simple package index generation
-                  echo "# Package Index for $arch - $branch" > Packages
-                  echo "# Generated on $(date)" >> Packages
-                  echo "" >> Packages
-                  
-                  # List all packages
-                  for pkg in *.ipk *.apk 2>/dev/null; do
-                    if [ -f "$pkg" ]; then
-                      echo "Package: $(basename "$pkg" .ipk | basename .apk)" >> Packages
-                      echo "Filename: $pkg" >> Packages
-                      echo "Size: $(stat -c%s "$pkg")" >> Packages
-                      echo "Architecture: $arch" >> Packages
-                      echo "Version: $branch" >> Packages
-                      echo "" >> Packages
-                    fi
-                  done
-                  
-                  cd - > /dev/null
-                fi
-              done
+              # Verify we got packages
+              if [ -z "$(find "$target_dir" -name '*.ipk' -o -name '*.apk')" ]; then
+                echo "::warning::No packages found in $target_dir"
+              fi
             fi
           done
 
-      - name: Update README
+      - name: Generate package indices
         run: |
-          cat > README.md << 'EOF'
-          # OpenWRT Custom Packages Repository
+          # Install dependencies for proper package indexing
+          sudo apt-get update
+          sudo apt-get install -y openwrt-sdk
           
-          This repository contains pre-built OpenWRT packages organized by version and architecture.
-          
-          ## Structure
-          
-          ```
-          packages/
-          ├── openwrt-23.05/
-          │   ├── arm_cortex-a9/
-          │   ├── aarch64_cortex-a53/
-          │   ├── mips_24kc/
-          │   └── ...
-          ├── openwrt-24.10/
-          │   ├── arm_cortex-a9/
-          │   ├── aarch64_cortex-a53/
-          │   ├── mips_24kc/
-          │   └── ...
-          └── SNAPSHOT/
-              ├── arm_cortex-a9/
-              ├── aarch64_cortex-a53/
-              ├── mips_24kc/
-              └── ...
-          ```
-          
-          ## Usage
-          
-          To use these packages in your OpenWRT system:
-          
-          1. Download the appropriate packages for your architecture and OpenWRT version
-          2. Transfer them to your OpenWRT device
-          3. Install using `opkg install package_name.ipk`
-          
-          ## Available Architectures
-          
+          for branch_dir in packages/*; do
+            branch=$(basename "$branch_dir")
+            for arch_dir in "$branch_dir"/*; do
+              arch=$(basename "$arch_dir")
+              
+              echo "Generating index for $branch/$arch"
+              
+              # Create proper Packages file
+              (cd "$arch_dir" && \
+               PATH="$PATH:/usr/sbin" \
+               /usr/bin/opkg-make-index . > Packages 2>/dev/null && \
+               gzip -9c Packages > Packages.gz)
+               
+              # Create signature (if we have a key)
+              if [ -n "${{ secrets.OPKG_KEY }}" ]; then
+                echo "${{ secrets.OPKG_KEY }}" | gpg --import
+                (cd "$arch_dir" && \
+                 gpg --batch --yes --detach-sign -a -o Packages.sig Packages)
+              fi
+            done
+          done
+
+      - name: Update repository metadata
+        run: |
+          # Create repository metadata
+          cat > packages/repository.json <<EOF
+          {
+            "repository": {
+              "version": "1.0",
+              "date": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
+              "packages": $(find packages -name '*.ipk' -o -name '*.apk' | wc -l),
+              "branches": $(ls -1 packages | wc -l),
+              "architectures": $(find packages -mindepth 2 -maxdepth 2 -type d | cut -d/ -f3 | sort -u | wc -l)
+          }
+          }
           EOF
           
-          # List available architectures and versions
-          echo "### OpenWRT Versions and Architectures:" >> README.md
-          echo "" >> README.md
-          
-          for branch_dir in packages/*/; do
-            if [ -d "$branch_dir" ]; then
-              branch=$(basename "$branch_dir")
-              echo "**$branch:**" >> README.md
-              for arch_dir in "$branch_dir"*/; do
-                if [ -d "$arch_dir" ]; then
-                  arch=$(basename "$arch_dir")
-                  pkg_count=$(find "$arch_dir" -name "*.ipk" -o -name "*.apk" 2>/dev/null | wc -l)
-                  echo "- $arch ($pkg_count packages)" >> README.md
-                fi
-              done
-              echo "" >> README.md
-            fi
-          done
-          
-          echo "## Last Updated" >> README.md
-          echo "" >> README.md
-          echo "$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> README.md
+          # Generate README
+          {
+            echo "# OpenWRT Custom Packages Repository"
+            echo "This repository contains pre-built packages for various OpenWRT versions and architectures."
+            echo ""
+            echo "## Repository Stats"
+            echo "- Last updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo "- Total packages: $(find packages -name '*.ipk' -o -name '*.apk' | wc -l)"
+            echo "- Supported OpenWRT versions:"
+            for branch in packages/*; do
+              echo "  - $(basename "$branch") ($(find "$branch" -name '*.ipk' -o -name '*.apk' | wc -l) packages)"
+            done
+            echo ""
+            echo "## Usage"
+            echo '```'
+            echo 'src/gz custom_packages https://raw.githubusercontent.com/your-repo/releases/packages/<branch>/<arch>'
+            echo '```'
+          } > README.md
 
-      - name: Commit and push to releases branch
+      - name: Commit and push changes
         run: |
-          # Add all changes
           git add .
-          
-          # Check if there are changes to commit
-          if ! git diff --staged --quiet; then
-            # Get trigger information
-            if [ "${{ github.event_name }}" = "push" ] && [ -n "${{ github.ref_name }}" ]; then
-              commit_msg="📦 Update packages from tag ${{ github.ref_name }}"
-            else
-              commit_msg="📦 Update packages from workflow dispatch"
-            fi
-            
-            git commit -m "$commit_msg" -m "- Updated packages for all architectures and OpenWRT versions" -m "- Generated package indices" -m "- Updated README with current package counts"
+          if ! git diff --cached --quiet; then
+            git commit -m "📦 Package update $(date -u '+%Y-%m-%d')" \
+                      -m "Updated packages for all architectures" \
+                      -m "Automated build from GitHub Actions"
             git push origin releases
-            
-            echo "✅ Successfully updated releases branch with new packages"
           else
-            echo "ℹ️ No changes to commit"
+            echo "No changes to commit"
           fi
-
-      - name: Clean up artifacts
-        uses: geekyeggo/delete-artifact@v4
-        if: always()
-        with:
-          name: packages_*
-          failOnError: false

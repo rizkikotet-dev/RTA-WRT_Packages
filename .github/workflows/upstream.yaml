@@ -2,8 +2,8 @@ name: 🔄 Sync KWRT Packages
 
 on:
   # 🕐 Jalankan setiap hari pada jam 02:00 UTC
-  schedule:
-    - cron: '0 2 * * *'
+  # schedule:
+  #   - cron: '0 2 * * *'
   
   # 🚀 Manual trigger
   workflow_dispatch:
