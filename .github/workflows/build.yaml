@@ -91,6 +91,8 @@ jobs:
       - name: 🎯 Generate Build Matrix
         id: set-matrix
         run: |
+          echo "🔍 Generating build matrix..."
+          
           # Define base matrix
           ARCHS='["aarch64_cortex-a53", "aarch64_cortex-a72", "aarch64_cortex-a76", "aarch64_generic", "x86_64"]'
           BRANCHES='["openwrt-23.05", "openwrt-24.10", "SNAPSHOT"]'
@@ -107,8 +109,8 @@ jobs:
           # Define exclusions
           EXCLUDE='[{"arch": "aarch64_cortex-a76", "branch": "openwrt-23.05"}]'
           
-          # Generate matrix using jq
-          MATRIX=$(jq -n \
+          # Generate compact JSON matrix
+          MATRIX=$(jq -n -c \
             --argjson archs "$ARCHS" \
             --argjson branches "$BRANCHES" \
             --argjson exclude "$EXCLUDE" \
