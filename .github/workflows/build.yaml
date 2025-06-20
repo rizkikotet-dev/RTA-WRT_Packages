@@ -102,8 +102,6 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.branch }}
           FEEDNAME: packages_custom
-          INDEX: 1
-          IGNORE_ERRORS: 1
           NO_REFRESH_CHECK: 1
 
       - name: Check build results
