@@ -104,7 +104,6 @@ jobs:
           FEEDNAME: packages_custom
           INDEX: 1
           IGNORE_ERRORS: 1
-          V: s
           NO_REFRESH_CHECK: 1
 
       - name: Check build results
@@ -194,7 +193,6 @@ jobs:
     name: Deploy ${{ matrix.branch }} packages
     needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     
     strategy:
       matrix:
