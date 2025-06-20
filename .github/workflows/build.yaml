@@ -44,9 +44,15 @@ jobs:
 
       - name: Free disk space
         run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost
+          # Remove unnecessary packages and files
+          sudo apt-get remove -y --purge man-db
           sudo apt-get clean
-          docker system prune -af
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /usr/share/swift
+          sudo rm -rf /var/lib/apt/lists/*
+          sudo rm -rf /tmp/*
+          
+          # Show available space
+          df -h
 
       - name: Prepare build environment
         run: |
@@ -68,20 +74,46 @@ jobs:
           echo "✅ Packages directory found"
           echo "Contents:"
           ls -la ${{ github.workspace }}/packages/ || echo "Directory is empty"
+          
+          # Find and list packages to build
+          if [ -d "packages" ]; then
+            echo "=== Scanning for packages ==="
+            PACKAGE_LIST=""
+            for makefile in $(find packages/ -name 'Makefile' 2>/dev/null); do
+              pkg_dir=$(dirname "$makefile")
+              pkg_name=$(basename "$pkg_dir")
+              echo "Found package: $pkg_name"
+              PACKAGE_LIST="$PACKAGE_LIST $pkg_name"
+            done
+            
+            if [ -n "$PACKAGE_LIST" ]; then
+              echo "Packages to build:$PACKAGE_LIST"
+              echo "PACKAGES_TO_BUILD=$PACKAGE_LIST" >> $GITHUB_ENV
+            else
+              echo "No packages found with Makefile"
+              echo "PACKAGES_TO_BUILD=" >> $GITHUB_ENV
+            fi
+          else
+            echo "PACKAGES_TO_BUILD=" >> $GITHUB_ENV
+          fi
 
       - name: Build packages
         uses: openwrt/gh-action-sdk@main
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.branch }}
           FEEDNAME: packages_custom
-          PACKAGES: $(find packages/ -name 'Makefile' -exec dirname {} \; | xargs -I {} basename {} | tr '\n' ' ')
           INDEX: 1
           IGNORE_ERRORS: 1
           V: s
+          NO_REFRESH_CHECK: 1
 
       - name: Check build results
         run: |
           echo "=== Build completed for ${{ matrix.arch }}-${{ matrix.branch }} ==="
+          
+          # Show what we have after build
+          echo "=== Workspace contents after build ==="
+          find . -maxdepth 3 -type d | sort
           
           # Fix permissions after build
           sudo chown -R $USER:$USER ${{ github.workspace }} || true
@@ -97,25 +129,23 @@ jobs:
           
           echo "Looking for .$PKG_EXT files..."
           
-          # Show directory structure for debugging
-          echo "=== Directory structure ==="
-          find . -type d -name "bin" -o -name "packages" | head -10 || echo "No relevant directories found"
-          
           # Look for packages in common locations
           PACKAGE_FOUND=false
           PACKAGE_COUNT=0
           
-          # Search for packages more thoroughly
+          # Standard OpenWrt SDK locations
           for search_dir in \
             "bin/packages/${{ matrix.arch }}/packages_custom" \
             "bin/packages/${{ matrix.arch }}" \
+            "staging_dir/packages/${{ matrix.arch }}" \
             "openwrt/bin/packages/${{ matrix.arch }}/packages_custom" \
             "openwrt/bin/packages/${{ matrix.arch }}" \
-            "staging_dir/packages/${{ matrix.arch }}" \
-            $(find . -type d -name "*packages*" 2>/dev/null | head -5); do
+            $(find . -path "*/bin/packages/*" -type d 2>/dev/null | head -10); do
             
             if [ -d "$search_dir" ]; then
               echo "Checking directory: $search_dir"
+              ls -la "$search_dir" || true
+              
               if find "$search_dir" -name "*.$PKG_EXT" 2>/dev/null | head -1 >/dev/null; then
                 echo "✅ Packages found in: $search_dir"
                 PACKAGES=$(find "$search_dir" -name "*.$PKG_EXT" 2>/dev/null)
@@ -123,9 +153,10 @@ jobs:
                 PACKAGE_COUNT=$(echo "$PACKAGES" | wc -l)
                 PACKAGE_FOUND=true
                 
-                # Copy packages to a standard location
+                # Ensure standard location exists and copy packages there
                 mkdir -p "bin/packages/${{ matrix.arch }}/packages_custom"
-                find "$search_dir" -name "*.$PKG_EXT" -exec cp {} "bin/packages/${{ matrix.arch }}/packages_custom/" \; 2>/dev/null || true
+                find "$search_dir" -name "*.$PKG_EXT" -exec cp -v {} "bin/packages/${{ matrix.arch }}/packages_custom/" \; 2>/dev/null || true
+                find "$search_dir" -name "Packages*" -exec cp -v {} "bin/packages/${{ matrix.arch }}/packages_custom/" \; 2>/dev/null || true
                 break
               fi
             fi
@@ -133,14 +164,18 @@ jobs:
           
           if [ "$PACKAGE_FOUND" = false ]; then
             echo "❌ No .$PKG_EXT packages found"
-            echo "=== Full directory listing ==="
-            find . -type f -name "*.$PKG_EXT" 2>/dev/null | head -20 || echo "No package files found anywhere"
+            echo "=== Searching for any package files ==="
+            find . -name "*.$PKG_EXT" -type f 2>/dev/null | head -20 || echo "No package files found anywhere"
             
-            # Check for build logs
-            echo "=== Build logs ==="
-            find . -name "*.log" -exec echo "=== {} ===" \; -exec tail -20 {} \; 2>/dev/null | head -50
+            echo "=== Looking for build errors ==="
+            find . -name "*.log" -exec echo "=== {} ===" \; -exec tail -30 {} \; 2>/dev/null | head -100
+            
+            echo "=== Directory structure ==="
+            find . -type d -name "*bin*" -o -name "*package*" | head -20
           else
             echo "✅ Successfully found $PACKAGE_COUNT packages"
+            echo "Final package location contents:"
+            ls -la "bin/packages/${{ matrix.arch }}/packages_custom/" || true
           fi
 
       - name: Store packages
@@ -148,11 +183,12 @@ jobs:
         with:
           name: packages-${{ matrix.branch }}-${{ matrix.arch }}
           path: |
-            bin/packages/
-            bin/targets/
-            staging_dir/packages/
+            bin/**
+            staging_dir/**
+            logs/**
+            .config
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 7
 
   deploy:
     name: Deploy ${{ matrix.branch }} packages
