@@ -202,11 +202,11 @@ jobs:
           fi
 
       - name: 🔨 Build Packages
-        uses: openwrt/gh-action-sdk@v6
+        uses: openwrt/gh-action-sdk@main
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.branch }}
           FEEDNAME: packages_custom
-          FEED_DIR: ./packages/
+          FEED_DIR: packages/
           INDEX: 1
           NO_REFRESH_CHECK: true
 
