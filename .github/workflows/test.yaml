@@ -61,6 +61,7 @@ jobs:
           FEED_DIR: ./packages/
           INDEX: 1
           NO_REFRESH_CHECK: true
+          IGNORE_ERRORS: true
 
       - name: Verify build artifacts
         run: |

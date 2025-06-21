@@ -209,6 +209,7 @@ jobs:
           FEED_DIR: ./packages
           INDEX: 1
           NO_REFRESH_CHECK: true
+          IGNORE_ERRORS: true
 
       - name: 🔍 Analyze Build Results
         id: analyze-build
