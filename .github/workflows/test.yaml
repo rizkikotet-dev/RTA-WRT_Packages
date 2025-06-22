@@ -31,8 +31,7 @@ on:
         required: false
         default: false
         type: boolean
-  schedule:
-    - cron: '0 2 * * 0'  # Weekly builds on Sunday 2 AM UTC
+
   push:
     branches: [main]
     paths: ['packages/**', '.github/workflows/**']
@@ -79,6 +78,9 @@ jobs:
       - name: 🏗️ Generate build matrix
         id: matrix
         run: |
+          custom_arch="${{ github.event.inputs.custom_arch }}"
+          custom_branch="${{ github.event.inputs.custom_branch }}"
+
           # Define architectures
           declare -a archs=(
             "aarch64_cortex-a53"
@@ -100,9 +102,9 @@ jobs:
               declare -a branches=("SNAPSHOT")
               ;;
             "custom")
-              if [[ -n "${{ github.event.inputs.custom_arch }}" && -n "${{ github.event.inputs.custom_branch }}" ]]; then
-                archs=("${{ github.event.inputs.custom_arch }}")
-                declare -a branches=("${{ github.event.inputs.custom_branch }}")
+              if [[ -n "$custom_arch" && -n "$custom_branch" ]]; then
+                archs=("$custom_arch")
+                declare -a branches=("$custom_branch")
               else
                 echo "❌ Custom arch and branch must be specified for custom build"
                 exit 1
