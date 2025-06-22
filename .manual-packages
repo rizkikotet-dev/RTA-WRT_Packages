@@ -1,0 +1,4 @@
+# Manual/Contributed Packages Registry
+# Add package names (one per line) that should NOT be removed during sync
+# Format: package-name or directory-name
+
