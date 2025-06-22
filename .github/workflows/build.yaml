@@ -166,98 +166,7 @@ jobs:
             fi
           done
 
-      - name: Setup tools for package indexing
-        run: |
-          # Download and setup opkg tools
-          wget https://downloads.openwrt.org/releases/23.05.0/targets/x86/64/openwrt-sdk-23.05.0-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz
-          tar xf openwrt-sdk-23.05.0-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz
-          SDK_PATH=$(pwd)/openwrt-sdk-23.05.0-x86-64_gcc-12.3.0_musl.Linux-x86_64
-          
-          # Alternative: Use opkg-utils if available
-          if ! command -v opkg-make-index &> /dev/null; then
-            echo "Installing opkg-utils..."
-            git clone https://git.openwrt.org/project/opkg-utils.git
-            cd opkg-utils
-            sudo make install PREFIX=/usr/local
-            cd ..
-            export PATH="/usr/local/bin:$PATH"
-          fi
 
-      - name: Generate package indices
-        run: |
-          export PATH="/usr/local/bin:$PATH"
-          
-          for branch_dir in packages/*; do
-            if [ ! -d "$branch_dir" ]; then
-              continue
-            fi
-            
-            branch=$(basename "$branch_dir")
-            echo "Processing branch: $branch"
-            
-            for arch_dir in "$branch_dir"/*; do
-              if [ ! -d "$arch_dir" ]; then
-                continue
-              fi
-              
-              arch=$(basename "$arch_dir")
-              echo "Generating index for $branch/$arch"
-              
-              # Check if there are any packages
-              if [ -z "$(find "$arch_dir" -name '*.ipk' -o -name '*.apk')" ]; then
-                echo "No packages found in $arch_dir, skipping"
-                continue
-              fi
-              
-              # Generate package index
-              cd "$arch_dir"
-              
-              # Try different methods to create Packages file
-              if command -v opkg-make-index &> /dev/null; then
-                opkg-make-index . > Packages 2>/dev/null || {
-                  echo "opkg-make-index failed, creating basic Packages file"
-                  > Packages
-                  for pkg in *.ipk *.apk 2>/dev/null; do
-                    if [ -f "$pkg" ]; then
-                      echo "Package: $(basename "$pkg" | sed 's/\.[^.]*$//')" >> Packages
-                      echo "Filename: $pkg" >> Packages
-                      echo "Size: $(stat -c%s "$pkg")" >> Packages
-                      echo "MD5Sum: $(md5sum "$pkg" | cut -d' ' -f1)" >> Packages
-                      echo "" >> Packages
-                    fi
-                  done
-                }
-              else
-                # Create basic Packages file manually
-                > Packages
-                for pkg in *.ipk *.apk 2>/dev/null; do
-                  if [ -f "$pkg" ]; then
-                    echo "Package: $(basename "$pkg" | sed 's/\.[^.]*$//')" >> Packages
-                    echo "Filename: $pkg" >> Packages
-                    echo "Size: $(stat -c%s "$pkg")" >> Packages
-                    echo "MD5Sum: $(md5sum "$pkg" | cut -d' ' -f1)" >> Packages
-                    echo "" >> Packages
-                  fi
-                done
-              fi
-              
-              # Compress the Packages file
-              if [ -s Packages ]; then
-                gzip -9c Packages > Packages.gz
-                echo "Created Packages index for $arch_dir"
-              else
-                echo "Warning: Empty Packages file for $arch_dir"
-              fi
-              
-              # Create signature if we have a key
-              if [ -n "${{ secrets.OPKG_KEY }}" ]; then
-                echo "${{ secrets.OPKG_KEY }}" | gpg --import --quiet
-                gpg --batch --yes --detach-sign -a -o Packages.sig Packages 2>/dev/null || true
-              fi
-              
-              cd - > /dev/null
-            done
-          done
 
       - name: Update repository metadata
         run: |
@@ -301,19 +210,30 @@ jobs:
             echo ""
             echo "## Usage"
             echo ""
-            echo "Add this repository to your OpenWRT device by adding the following line to \`/etc/opkg/customfeeds.conf\`:"
+            echo "## Available Packages by Architecture"
             echo ""
-            echo '```'
-            echo 'src/gz custom_packages https://raw.githubusercontent.com/${{ github.repository }}/releases/packages/<branch>/<arch>'
-            echo '```'
+            
+            for branch in packages/*; do
+              if [ -d "$branch" ]; then
+                branch_name=$(basename "$branch")
+                echo "### $branch_name"
+                echo ""
+                for arch in "$branch"/*; do
+                  if [ -d "$arch" ]; then
+                    arch_name=$(basename "$arch")
+                    arch_packages=$(find "$arch" -name '*.ipk' -o -name '*.apk' | wc -l)
+                    if [ $arch_packages -gt 0 ]; then
+                      echo "- **$arch_name**: $arch_packages packages"
+                    fi
+                  fi
+                done
+                echo ""
+              fi
+            done
+            
+            echo "## Download"
             echo ""
-            echo "Replace \`<branch>\` with your OpenWRT version (e.g., openwrt-23.05) and \`<arch>\` with your device architecture."
-            echo ""
-            echo "Then run:"
-            echo '```'
-            echo 'opkg update'
-            echo 'opkg install <package-name>'
-            echo '```'
+            echo "Browse and download packages directly from the [releases branch](https://github.com/${{ github.repository }}/tree/releases/packages)."
           } > README.md
 
       - name: Commit and push changes
