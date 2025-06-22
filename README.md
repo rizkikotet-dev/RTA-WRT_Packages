@@ -92,7 +92,7 @@ opkg list | grep custom_packages
 Want to add your packages? Here's how:
 
 1. **Fork** this repository
-2. **Add** your packages to the `packages/` directory
+2. **Add** your packages to the `packages/` directory and in .name-packages
 3. **Test** locally with OpenWRT SDK
 4. **Submit** a pull request
 
