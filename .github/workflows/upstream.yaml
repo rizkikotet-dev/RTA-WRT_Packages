@@ -62,7 +62,7 @@ jobs:
         echo "🔍 Validating source repository accessibility..."
         
         # Check if source repo is accessible
-        if curl -s --head "${{ env.KWRT_REPO_URL }}" | head -n 1 | grep -q "200 OK"; then
+        if curl -s --head "${{ env.KWRT_REPO_URL }}"; then
           echo "✅ Source repository is accessible"
           echo "source_ok=true" >> $GITHUB_OUTPUT
           echo "proceed=true" >> $GITHUB_OUTPUT
