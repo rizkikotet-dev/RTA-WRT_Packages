@@ -26,11 +26,6 @@ on:
         description: '🌿 Custom branch (if custom selected)'
         required: false
         type: string
-      skip_tests:
-        description: '⏭️ Skip package validation tests'
-        required: false
-        default: false
-        type: boolean
 
   push:
     branches: [main]
@@ -226,24 +221,6 @@ jobs:
             echo "::notice::✅ Successfully built $PACKAGE_COUNT packages"
             echo "has_packages=true" >> $GITHUB_OUTPUT
             echo "package_count=$PACKAGE_COUNT" >> $GITHUB_OUTPUT
-            
-            # Package validation (if not skipped)
-            if [[ "${{ github.event.inputs.skip_tests }}" != "true" ]]; then
-              echo "::group::🧪 Package validation"
-              failed_packages=0
-              
-              find "$BUILD_DIR" -name "*.ipk" | while read -r package; do
-                if ! opkg-utils/opkg-info "$package" > /dev/null 2>&1; then
-                  echo "::warning::⚠️ Package validation failed: $(basename "$package")"
-                  ((failed_packages++))
-                fi
-              done
-              
-              if [[ $failed_packages -gt 0 ]]; then
-                echo "::warning::$failed_packages packages failed validation"
-              fi
-              echo "::endgroup::"
-            fi
           fi
 
       - name: 📦 Organize and package artifacts
@@ -294,19 +271,6 @@ jobs:
             echo "opkg install <package_name>"
             echo "\`\`\`"
           } > "$OUTPUT_DIR/README.md"
-          
-          # Create package index
-          (
-            cd "$OUTPUT_DIR"
-            echo "Packages:" > Packages
-            for pkg in *.ipk *.apk 2>/dev/null; do
-              [[ -f "$pkg" ]] || continue
-              opkg-utils/opkg-info "$pkg" >> Packages
-              echo "" >> Packages
-            done 2>/dev/null || true
-            
-            gzip -c Packages > Packages.gz
-          )
           
           echo "::endgroup::"
           
@@ -497,7 +461,6 @@ jobs:
                 # Copy metadata
                 [[ -f "$search_path/README.md" ]] && cp "$search_path/README.md" "$target_dir/"
                 [[ -f "$search_path/Packages" ]] && cp "$search_path/Packages" "$target_dir/"
-                [[ -f "$search_path/Packages.gz" ]] && cp "$search_path/Packages.gz" "$target_dir/"
                 
                 break
               fi
@@ -674,7 +637,7 @@ jobs:
           
           ```bash
           # Add custom repository (replace [BRANCH] and [ARCH] with your values)
-          echo "src/gz custom_packages https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/releases/packages/[BRANCH]/[ARCH]" >> /etc/opkg/customfeeds.conf
+          echo "src/gz custom_packages https://raw.githubusercontent.com/rizkikotet-dev/RTA-WRT_Packages/releases/packages/[BRANCH]/[ARCH]" >> /etc/opkg/customfeeds.conf
           
           # Update package lists
           opkg update
@@ -696,7 +659,7 @@ jobs:
           BRANCH="openwrt-23.05"  # or openwrt-24.10, SNAPSHOT
           
           # Add repository
-          echo "src/gz custom_packages https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/releases/packages/$BRANCH/$ARCH" > /etc/opkg/customfeeds.conf
+          echo "src/gz custom_packages https://raw.githubusercontent.com/rizkikotet-dev/RTA-WRT_Packages/releases/packages/$BRANCH/$ARCH" > /etc/opkg/customfeeds.conf
           
           # Update and install
           opkg update
@@ -778,8 +741,6 @@ jobs:
           ```bash
           # Verify repository URL is correct
           cat /etc/opkg/customfeeds.conf
-          # Test connectivity
-          wget -q --spider [repository_url]/Packages.gz
           ```
           
           </details>
@@ -788,13 +749,13 @@ jobs:
           
           <div align="center">
             <a href="../../actions">
-              <img src="https://img.shields.io/github/actions/workflow/status/YOUR_USERNAME/YOUR_REPO/build.yml?branch=main&style=for-the-badge&logo=github-actions" alt="Build Status">
+              <img src="https://img.shields.io/github/actions/workflow/status/rizkikotet-dev/RTA-WRT_Packages/build.yml?branch=main&style=for-the-badge&logo=github-actions" alt="Build Status">
             </a>
             <a href="../../releases">
-              <img src="https://img.shields.io/github/v/release/YOUR_USERNAME/YOUR_REPO?style=for-the-badge&logo=github" alt="Latest Release">
+              <img src="https://img.shields.io/github/v/release/rizkikotet-dev/RTA-WRT_Packages?style=for-the-badge&logo=github" alt="Latest Release">
             </a>
             <a href="../../commits/main">
-              <img src="https://img.shields.io/github/last-commit/YOUR_USERNAME/YOUR_REPO?style=for-the-badge&logo=git" alt="Last Commit">
+              <img src="https://img.shields.io/github/last-commit/rizkikotet-dev/RTA-WRT_Packages?style=for-the-badge&logo=git" alt="Last Commit">
             </a>
           </div>
           
@@ -826,7 +787,7 @@ jobs:
           </div>
           
           <div align="center">
-            <sub>Built with ❤️ using GitHub Actions • Powered by OpenWRT</sub>
+            <sub>Built with ❤️ using GitHub Actions • Powered by OpenWRT | RizkiKotet</sub>
           </div>
           USAGE
           } > README.md
