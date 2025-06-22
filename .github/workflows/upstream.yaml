@@ -1,199 +1,477 @@
-name: 🔄 Sync KWRT Packages
+name: 🚀 KWRT Packages Sync Pipeline
 
 on:
-  # 🕐 Jalankan setiap hari pada jam 02:00 UTC
-  # schedule:
-  #   - cron: '0 2 * * *'
+  # ⏰ Daily sync at 02:00 UTC
+  schedule:
+    - cron: '0 2 * * *'
   
-  # 🚀 Manual trigger
+  # 🎯 Manual trigger with advanced options
   workflow_dispatch:
     inputs:
       force_sync:
-        description: '🔧 Force sync even if no changes'
+        description: '⚡ Force sync regardless of changes'
         required: false
         default: false
         type: boolean
+      
+      sync_mode:
+        description: '🔄 Sync mode'
+        required: false
+        default: 'standard'
+        type: choice
+        options:
+          - standard
+          - deep-clean
+          - quick-check
+      
+      notification_level:
+        description: '📢 Notification level'
+        required: false
+        default: 'normal'
+        type: choice
+        options:
+          - minimal
+          - normal
+          - verbose
 
 env:
+  # 🌟 Configuration
   KWRT_REPO_URL: https://github.com/kiddin9/kwrt-packages
   PACKAGES_DIR: packages
+  WORKFLOW_VERSION: "2.0.0"
+  
+  # 🎨 Styling
+  EMOJI_SUCCESS: "✨"
+  EMOJI_ERROR: "🔥"
+  EMOJI_INFO: "💡"
+  EMOJI_SYNC: "⚡"
 
 jobs:
-  sync-packages:
-    name: 📦 Sync KWRT Packages
+  # 🔍 Pre-flight checks
+  preflight:
+    name: 🛡️ Pre-flight Validation
     runs-on: ubuntu-latest
+    outputs:
+      should_proceed: ${{ steps.validation.outputs.proceed }}
+      source_available: ${{ steps.validation.outputs.source_ok }}
     
     steps:
-    - name: 📂 Checkout Repository
+    - name: 🔍 Validate Source Repository
+      id: validation
+      run: |
+        echo "🔍 Validating source repository accessibility..."
+        
+        # Check if source repo is accessible
+        if curl -s --head "${{ env.KWRT_REPO_URL }}" | head -n 1 | grep -q "200 OK"; then
+          echo "✅ Source repository is accessible"
+          echo "source_ok=true" >> $GITHUB_OUTPUT
+          echo "proceed=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Source repository is not accessible"
+          echo "source_ok=false" >> $GITHUB_OUTPUT
+          echo "proceed=false" >> $GITHUB_OUTPUT
+        fi
+
+  # 🚀 Main sync job
+  sync-packages:
+    name: 🚀 Package Synchronization
+    runs-on: ubuntu-latest
+    needs: preflight
+    if: needs.preflight.outputs.should_proceed == 'true'
+    
+    steps:
+    - name: 🎯 Initialize Workspace
       uses: actions/checkout@v4
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         fetch-depth: 0
-    
-    - name: 🏗️ Setup Environment
+        
+    - name: 🔧 Configure Environment
       run: |
-        echo "🔧 Setting up sync environment..."
+        echo "🔧 Setting up advanced sync environment..."
+        
+        # Environment variables
         echo "SOURCE_URL=${{ env.KWRT_REPO_URL }}" >> $GITHUB_ENV
-        echo "SYNC_DATE=$(date +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_ENV
-        echo "COMMIT_HASH=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_ENV
-    
-    - name: 📁 Prepare Packages Directory
+        echo "SYNC_TIMESTAMP=$(date +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_ENV
+        echo "SYNC_ID=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_ENV
+        echo "WORKFLOW_VERSION=${{ env.WORKFLOW_VERSION }}" >> $GITHUB_ENV
+        
+        # Sync mode configuration
+        case "${{ github.event.inputs.sync_mode || 'standard' }}" in
+          "deep-clean")
+            echo "SYNC_MODE=🧹 Deep Clean" >> $GITHUB_ENV
+            echo "CLEAN_STRATEGY=aggressive" >> $GITHUB_ENV
+            ;;
+          "quick-check")
+            echo "SYNC_MODE=⚡ Quick Check" >> $GITHUB_ENV
+            echo "CLEAN_STRATEGY=minimal" >> $GITHUB_ENV
+            ;;
+          *)
+            echo "SYNC_MODE=🔄 Standard" >> $GITHUB_ENV
+            echo "CLEAN_STRATEGY=standard" >> $GITHUB_ENV
+            ;;
+        esac
+        
+        # Create sync metadata
+        echo "📊 Sync Configuration:"
+        echo "  🆔 Sync ID: $SYNC_ID"
+        echo "  🕒 Timestamp: $(date +'%Y-%m-%d %H:%M:%S UTC')"
+        echo "  🔄 Mode: $SYNC_MODE"
+        echo "  📦 Version: ${{ env.WORKFLOW_VERSION }}"
+
+    - name: 🏗️ Prepare Workspace
       run: |
-        echo "📁 Creating packages directory structure..."
+        echo "🏗️ Preparing synchronized workspace..."
+        
+        # Create directory structure
         mkdir -p ${{ env.PACKAGES_DIR }}
+        mkdir -p .sync-metadata
         
-        # 💾 Backup .gitkeep if exists
+        # Preserve important files
         if [ -f ${{ env.PACKAGES_DIR }}/.gitkeep ]; then
-          echo "💾 Backing up .gitkeep file..."
-          cp ${{ env.PACKAGES_DIR }}/.gitkeep /tmp/.gitkeep.backup
+          echo "💾 Preserving .gitkeep file..."
+          cp ${{ env.PACKAGES_DIR }}/.gitkeep .sync-metadata/.gitkeep.backup
         fi
-    
-    - name: ⬇️ Download KWRT Packages
+        
+        # Create sync manifest
+        cat > .sync-metadata/sync-manifest.json << EOF
+        {
+          "sync_id": "${{ env.SYNC_ID }}",
+          "timestamp": "${{ env.SYNC_TIMESTAMP }}",
+          "source_url": "${{ env.KWRT_REPO_URL }}",
+          "workflow_version": "${{ env.WORKFLOW_VERSION }}",
+          "sync_mode": "${{ env.SYNC_MODE }}",
+          "triggered_by": "${{ github.event_name }}",
+          "actor": "${{ github.actor }}"
+        }
+        EOF
+        
+        echo "✅ Workspace prepared successfully!"
+
+    - name: 📡 Fetch Source Repository
       run: |
-        echo "⬇️ Downloading latest KWRT packages..."
-        echo "📡 Source: ${{ env.KWRT_REPO_URL }}"
+        echo "📡 Fetching latest packages from source..."
+        echo "🎯 Source: ${{ env.KWRT_REPO_URL }}"
         
-        wget -q --show-progress --progress=bar:force \
-          -O kwrt-packages.zip \
-          ${{ env.KWRT_REPO_URL }}/archive/refs/heads/main.zip
+        # Download with progress and retry logic
+        for attempt in 1 2 3; do
+          echo "🔄 Attempt $attempt/3..."
+          
+          if wget -q --show-progress --progress=bar:force \
+            --timeout=30 --tries=3 \
+            -O kwrt-packages.zip \
+            "${{ env.KWRT_REPO_URL }}/archive/refs/heads/main.zip"; then
+            
+            echo "✅ Download successful on attempt $attempt!"
+            break
+          else
+            echo "⚠️ Attempt $attempt failed, retrying..."
+            [ $attempt -eq 3 ] && exit 1
+            sleep 5
+          fi
+        done
         
-        echo "✅ Download completed successfully!"
+        # Verify download
+        if [ ! -f kwrt-packages.zip ] || [ ! -s kwrt-packages.zip ]; then
+          echo "❌ Download verification failed!"
+          exit 1
+        fi
+        
+        echo "📊 Download statistics:"
         ls -lah kwrt-packages.zip
-    
-    - name: 📦 Extract and Process Files
+        echo "🔐 File integrity: $(sha256sum kwrt-packages.zip | cut -d' ' -f1)"
+
+    - name: 🎁 Extract and Process
       run: |
-        echo "📦 Extracting downloaded archive..."
-        unzip -q kwrt-packages.zip
+        echo "🎁 Processing downloaded archive..."
         
-        echo "🧹 Cleaning existing packages directory..."
-        rm -rf ${{ env.PACKAGES_DIR }}/*
-        
-        # 💾 Restore .gitkeep if it existed
-        if [ -f /tmp/.gitkeep.backup ]; then
-          echo "💾 Restoring .gitkeep file..."
-          mv /tmp/.gitkeep.backup ${{ env.PACKAGES_DIR }}/.gitkeep
+        # Extract with verification
+        if ! unzip -q kwrt-packages.zip; then
+          echo "❌ Archive extraction failed!"
+          exit 1
         fi
         
-        echo "📋 Processing and moving files..."
+        echo "🧹 Applying ${{ env.CLEAN_STRATEGY }} cleaning strategy..."
+        
+        # Advanced cleaning based on strategy
+        case "${{ env.CLEAN_STRATEGY }}" in
+          "aggressive")
+            echo "🧹 Performing deep clean..."
+            rm -rf ${{ env.PACKAGES_DIR }}/*
+            rm -rf ${{ env.PACKAGES_DIR }}/.[!.]*
+            ;;
+          "minimal")
+            echo "🧹 Performing minimal clean..."
+            find ${{ env.PACKAGES_DIR }} -type f -name "*.tmp" -delete 2>/dev/null || true
+            ;;
+          *)
+            echo "🧹 Performing standard clean..."
+            rm -rf ${{ env.PACKAGES_DIR }}/*
+            ;;
+        esac
+        
+        # Restore preserved files
+        if [ -f .sync-metadata/.gitkeep.backup ]; then
+          echo "💾 Restoring preserved files..."
+          mv .sync-metadata/.gitkeep.backup ${{ env.PACKAGES_DIR }}/.gitkeep
+        fi
+        
+        # Process files with enhanced filtering
+        echo "📦 Processing package files..."
         cd kwrt-packages-main
         
-        # 📊 Count files before moving
-        TOTAL_FILES=$(find . -maxdepth 1 -type f -not -name 'README.md' | wc -l)
-        TOTAL_DIRS=$(find . -maxdepth 1 -type d -not -name '.' -not -name '.github' | wc -l)
+        # Count and categorize files
+        TOTAL_FILES=$(find . -maxdepth 1 -type f -not -name 'README*' -not -name '.*' | wc -l)
+        TOTAL_DIRS=$(find . -maxdepth 1 -type d -not -name '.' -not -name '.github' -not -name '.git' | wc -l)
         
-        echo "📊 Files to sync: $TOTAL_FILES files, $TOTAL_DIRS directories"
+        echo "📊 Processing statistics:"
+        echo "  📄 Files: $TOTAL_FILES"
+        echo "  📁 Directories: $TOTAL_DIRS"
         
-        # 🚚 Move files (exclude README.md and .github)
-        find . -maxdepth 1 -type f -not -name 'README.md' -exec mv {} ../${{ env.PACKAGES_DIR }}/ \;
-        find . -maxdepth 1 -type d -not -name '.' -not -name '.github' -exec mv {} ../${{ env.PACKAGES_DIR }}/ \;
+        # Smart file moving with exclusions
+        find . -maxdepth 1 -type f \
+          -not -name 'README*' \
+          -not -name 'LICENSE*' \
+          -not -name '.*' \
+          -not -name '*.md' \
+          -exec mv {} ../${{ env.PACKAGES_DIR }}/ \; 2>/dev/null || true
+        
+        find . -maxdepth 1 -type d \
+          -not -name '.' \
+          -not -name '.github' \
+          -not -name '.git' \
+          -exec mv {} ../${{ env.PACKAGES_DIR }}/ \; 2>/dev/null || true
         
         cd ..
         
-        echo "🧹 Cleaning up temporary files..."
-        rm -rf kwrt-packages.zip kwrt-packages-main
+        # Cleanup
+        echo "🧹 Cleaning temporary files..."
+        rm -rf kwrt-packages.zip kwrt-packages-main .sync-metadata
         
-        echo "✅ File processing completed!"
-    
-    - name: 🔍 Analyze Changes
-      id: analyze_changes
+        echo "✅ Processing completed successfully!"
+
+    - name: 🔬 Advanced Change Analysis
+      id: analyze
       run: |
-        echo "🔍 Analyzing changes in repository..."
+        echo "🔬 Performing advanced change analysis..."
         
-        # Check for changes
+        # Detailed git analysis
         if [[ -n $(git status --porcelain) ]]; then
-          echo "changes=true" >> $GITHUB_OUTPUT
-          echo "📝 Changes detected in packages directory"
+          echo "🎯 Changes detected!"
+          echo "has_changes=true" >> $GITHUB_OUTPUT
           
-          # Count changes
-          ADDED=$(git status --porcelain | grep "^A" | wc -l)
-          MODIFIED=$(git status --porcelain | grep "^M" | wc -l)
-          DELETED=$(git status --porcelain | grep "^D" | wc -l)
-          UNTRACKED=$(git status --porcelain | grep "^??" | wc -l)
+          # Comprehensive change analysis
+          ADDED=$(git status --porcelain | grep -c "^A" || echo "0")
+          MODIFIED=$(git status --porcelain | grep -c "^M" || echo "0")
+          DELETED=$(git status --porcelain | grep -c "^D" || echo "0")
+          RENAMED=$(git status --porcelain | grep -c "^R" || echo "0")
+          UNTRACKED=$(git status --porcelain | grep -c "^??" || echo "0")
           
+          # Calculate change metrics
+          TOTAL_CHANGES=$((ADDED + MODIFIED + DELETED + RENAMED + UNTRACKED))
+          
+          # Set outputs
           echo "added=$ADDED" >> $GITHUB_OUTPUT
           echo "modified=$MODIFIED" >> $GITHUB_OUTPUT
           echo "deleted=$DELETED" >> $GITHUB_OUTPUT
+          echo "renamed=$RENAMED" >> $GITHUB_OUTPUT
           echo "untracked=$UNTRACKED" >> $GITHUB_OUTPUT
+          echo "total_changes=$TOTAL_CHANGES" >> $GITHUB_OUTPUT
           
-          echo "📊 Change summary:"
-          echo "  ➕ Added: $ADDED files"
-          echo "  ✏️ Modified: $MODIFIED files"
-          echo "  ❌ Deleted: $DELETED files"
-          echo "  📄 Untracked: $UNTRACKED files"
+          # Determine change magnitude
+          if [ $TOTAL_CHANGES -gt 100 ]; then
+            echo "change_magnitude=major" >> $GITHUB_OUTPUT
+            echo "🔥 Major changes detected ($TOTAL_CHANGES files)"
+          elif [ $TOTAL_CHANGES -gt 20 ]; then
+            echo "change_magnitude=moderate" >> $GITHUB_OUTPUT
+            echo "⚡ Moderate changes detected ($TOTAL_CHANGES files)"
+          else
+            echo "change_magnitude=minor" >> $GITHUB_OUTPUT
+            echo "✨ Minor changes detected ($TOTAL_CHANGES files)"
+          fi
+          
+          # Enhanced change summary
+          echo "📊 Detailed Change Analysis:"
+          echo "  ➕ Added: $ADDED"
+          echo "  ✏️ Modified: $MODIFIED"
+          echo "  ❌ Deleted: $DELETED"
+          echo "  🔄 Renamed: $RENAMED"
+          echo "  📄 Untracked: $UNTRACKED"
+          echo "  📈 Total: $TOTAL_CHANGES"
+          
         else
-          echo "changes=false" >> $GITHUB_OUTPUT
-          echo "ℹ️ No changes detected"
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+          echo "total_changes=0" >> $GITHUB_OUTPUT
+          echo "change_magnitude=none" >> $GITHUB_OUTPUT
+          echo "ℹ️ No changes detected - repository is up to date"
         fi
-    
-    - name: 💾 Commit and Push Changes
-      if: steps.analyze_changes.outputs.changes == 'true' || github.event.inputs.force_sync == 'true'
-      run: |
-        echo "💾 Committing changes to repository..."
-        
-        git config --global user.email "action@github.com"
-        git config --global user.name "🤖 KWRT Sync Bot"
-        
-        # Create detailed commit message
-        COMMIT_MSG="🔄 Auto-sync: Update KWRT packages
 
-        📅 Sync Date: ${{ env.SYNC_DATE }}
-        📡 Source: ${{ env.KWRT_REPO_URL }}
-        🔗 Commit Hash: ${{ env.COMMIT_HASH }}
+    - name: 🚀 Smart Commit & Deploy
+      if: steps.analyze.outputs.has_changes == 'true' || github.event.inputs.force_sync == 'true'
+      run: |
+        echo "🚀 Deploying changes with smart commit..."
         
-        📊 Changes Summary:
-        ➕ Added: ${{ steps.analyze_changes.outputs.added || 0 }} files
-        ✏️ Modified: ${{ steps.analyze_changes.outputs.modified || 0 }} files
-        ❌ Deleted: ${{ steps.analyze_changes.outputs.deleted || 0 }} files
-        📄 New: ${{ steps.analyze_changes.outputs.untracked || 0 }} files"
+        # Configure git with enhanced identity
+        git config --global user.email "noreply@github.com"
+        git config --global user.name "🤖 KWRT Sync Bot v${{ env.WORKFLOW_VERSION }}"
         
+        # Generate smart commit message
+        MAGNITUDE="${{ steps.analyze.outputs.change_magnitude || 'forced' }}"
+        TOTAL_CHANGES="${{ steps.analyze.outputs.total_changes || '0' }}"
+        
+        case "$MAGNITUDE" in
+          "major")
+            COMMIT_ICON="🔥"
+            COMMIT_TYPE="feat"
+            ;;
+          "moderate")
+            COMMIT_ICON="⚡"
+            COMMIT_TYPE="update"
+            ;;
+          "minor")
+            COMMIT_ICON="✨"
+            COMMIT_TYPE="sync"
+            ;;
+          "forced")
+            COMMIT_ICON="🚀"
+            COMMIT_TYPE="force"
+            ;;
+          *)
+            COMMIT_ICON="🔄"
+            COMMIT_TYPE="sync"
+            ;;
+        esac
+        
+        # Create semantic commit message
+        COMMIT_MSG="$COMMIT_ICON $COMMIT_TYPE: KWRT packages sync ($TOTAL_CHANGES changes)
+
+        🎯 Sync Details:
+        ├─ 📅 Date: ${{ env.SYNC_TIMESTAMP }}
+        ├─ 🆔 ID: ${{ env.SYNC_ID }}
+        ├─ 🔄 Mode: ${{ env.SYNC_MODE }}
+        ├─ 📦 Version: ${{ env.WORKFLOW_VERSION }}
+        └─ 📡 Source: ${{ env.KWRT_REPO_URL }}
+        
+        📊 Change Summary:
+        ├─ ➕ Added: ${{ steps.analyze.outputs.added || 0 }}
+        ├─ ✏️ Modified: ${{ steps.analyze.outputs.modified || 0 }}
+        ├─ ❌ Deleted: ${{ steps.analyze.outputs.deleted || 0 }}
+        ├─ 🔄 Renamed: ${{ steps.analyze.outputs.renamed || 0 }}
+        └─ 📄 New: ${{ steps.analyze.outputs.untracked || 0 }}
+        
+        🤖 Automated by GitHub Actions
+        🔗 Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        
+        # Commit and push
         git add ${{ env.PACKAGES_DIR }}/
         git commit -m "$COMMIT_MSG"
         git push
         
-        echo "✅ Changes committed and pushed successfully!"
-    
-    - name: 📋 Generate Summary Report
+        echo "✅ Changes deployed successfully!"
+
+    - name: 📊 Generate Advanced Report
       run: |
-        echo "📋 Generating sync summary report..."
+        echo "📊 Generating comprehensive sync report..."
         
-        echo "# 🔄 KWRT Packages Sync Report" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "## 📊 Sync Information" >> $GITHUB_STEP_SUMMARY
-        echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
-        echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
-        echo "| 📅 **Sync Date** | \`${{ env.SYNC_DATE }}\` |" >> $GITHUB_STEP_SUMMARY
-        echo "| 📡 **Source Repository** | [${{ env.KWRT_REPO_URL }}](${{ env.KWRT_REPO_URL }}) |" >> $GITHUB_STEP_SUMMARY
-        echo "| 🔗 **Workflow Run** | [\`${{ github.run_id }}\`](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        if [[ "${{ steps.analyze_changes.outputs.changes }}" == "true" ]]; then
-          echo "## ✅ Sync Status: SUCCESS" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📈 Changes Detected and Applied" >> $GITHUB_STEP_SUMMARY
-          echo "| Change Type | Count |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| ➕ **Added** | \`${{ steps.analyze_changes.outputs.added || 0 }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| ✏️ **Modified** | \`${{ steps.analyze_changes.outputs.modified || 0 }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| ❌ **Deleted** | \`${{ steps.analyze_changes.outputs.deleted || 0 }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| 📄 **New Files** | \`${{ steps.analyze_changes.outputs.untracked || 0 }}\` |" >> $GITHUB_STEP_SUMMARY
+        # Determine status
+        if [[ "${{ steps.analyze.outputs.has_changes }}" == "true" ]]; then
+          STATUS_ICON="✅"
+          STATUS_TEXT="SUCCESS"
+          STATUS_COLOR="green"
         elif [[ "${{ github.event.inputs.force_sync }}" == "true" ]]; then
-          echo "## 🔧 Sync Status: FORCED" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "🔧 **Force sync was triggered manually**" >> $GITHUB_STEP_SUMMARY
+          STATUS_ICON="🚀"
+          STATUS_TEXT="FORCED"
+          STATUS_COLOR="blue"
         else
-          echo "## ℹ️ Sync Status: NO CHANGES" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "ℹ️ **Repository is already up to date**" >> $GITHUB_STEP_SUMMARY
+          STATUS_ICON="ℹ️"
+          STATUS_TEXT="NO CHANGES"
+          STATUS_COLOR="gray"
         fi
         
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "---" >> $GITHUB_STEP_SUMMARY
-        echo "*🤖 Automated sync powered by GitHub Actions*" >> $GITHUB_STEP_SUMMARY
-    
-    - name: 🎉 Sync Completion
+        # Generate advanced report
+        cat >> $GITHUB_STEP_SUMMARY << EOF
+        # 🚀 KWRT Packages Sync Report v${{ env.WORKFLOW_VERSION }}
+        
+        ## $STATUS_ICON Status: **$STATUS_TEXT**
+        
+        ### 📋 Sync Information
+        
+        | 🏷️ Property | 📝 Value |
+        |-------------|----------|
+        | **🆔 Sync ID** | \`${{ env.SYNC_ID }}\` |
+        | **📅 Timestamp** | \`${{ env.SYNC_TIMESTAMP }}\` |
+        | **🔄 Mode** | ${{ env.SYNC_MODE }} |
+        | **📦 Version** | \`${{ env.WORKFLOW_VERSION }}\` |
+        | **👤 Triggered By** | \`${{ github.actor }}\` |
+        | **🎯 Event** | \`${{ github.event_name }}\` |
+        | **📡 Source** | [${{ env.KWRT_REPO_URL }}](${{ env.KWRT_REPO_URL }}) |
+        | **🔗 Workflow** | [Run #${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+        
+        EOF
+        
+        # Add change details if applicable
+        if [[ "${{ steps.analyze.outputs.has_changes }}" == "true" ]]; then
+          MAGNITUDE="${{ steps.analyze.outputs.change_magnitude }}"
+          
+          case "$MAGNITUDE" in
+            "major") MAGNITUDE_ICON="🔥"; MAGNITUDE_DESC="Major Update" ;;
+            "moderate") MAGNITUDE_ICON="⚡"; MAGNITUDE_DESC="Moderate Update" ;;
+            "minor") MAGNITUDE_ICON="✨"; MAGNITUDE_DESC="Minor Update" ;;
+            *) MAGNITUDE_ICON="🔄"; MAGNITUDE_DESC="Standard Update" ;;
+          esac
+          
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+        ### $MAGNITUDE_ICON Change Analysis: **$MAGNITUDE_DESC**
+        
+        | 📊 Change Type | 🔢 Count | 📈 Impact |
+        |----------------|----------|-----------|
+        | ➕ **Added** | \`${{ steps.analyze.outputs.added || 0 }}\` | New packages/files |
+        | ✏️ **Modified** | \`${{ steps.analyze.outputs.modified || 0 }}\` | Updated content |
+        | ❌ **Deleted** | \`${{ steps.analyze.outputs.deleted || 0 }}\` | Removed items |
+        | 🔄 **Renamed** | \`${{ steps.analyze.outputs.renamed || 0 }}\` | Restructured files |
+        | 📄 **New Files** | \`${{ steps.analyze.outputs.untracked || 0 }}\` | Fresh additions |
+        | **🎯 Total Changes** | **\`${{ steps.analyze.outputs.total_changes || 0 }}\`** | **Overall impact** |
+        
+        EOF
+        fi
+        
+        # Add footer
+        cat >> $GITHUB_STEP_SUMMARY << EOF
+        ---
+        
+        ### 🎯 Quick Actions
+        
+        - 🔄 [View Source Repository](${{ env.KWRT_REPO_URL }})
+        - 📦 [Browse Packages](${{ github.server_url }}/${{ github.repository }}/tree/main/${{ env.PACKAGES_DIR }})
+        - 📊 [Workflow History](${{ github.server_url }}/${{ github.repository }}/actions/workflows/sync-kwrt.yml)
+        - 🚀 [Manual Sync](${{ github.server_url }}/${{ github.repository }}/actions/workflows/sync-kwrt.yml)
+        
+        ---
+        
+        <div align="center">
+        
+        **🤖 Powered by GitHub Actions** • **⚡ KWRT Sync Bot v${{ env.WORKFLOW_VERSION }}**
+        
+        *Automated package synchronization for the modern era*
+        
+        </div>
+        EOF
+
+    - name: 🎉 Sync Complete
       run: |
-        echo "🎉 KWRT Packages sync workflow completed successfully!"
-        echo "📊 Summary:"
-        echo "  📅 Date: ${{ env.SYNC_DATE }}"
-        echo "  📡 Source: ${{ env.KWRT_REPO_URL }}"
-        echo "  🔄 Status: $([ "${{ steps.analyze_changes.outputs.changes }}" == "true" ] && echo "✅ Updated" || echo "ℹ️ No changes")"
+        echo "🎉 KWRT Packages sync pipeline completed successfully!"
+        echo ""
+        echo "📊 Final Summary:"
+        echo "┌─────────────────────────────────────────────────────────────┐"
+        echo "│                    🚀 SYNC COMPLETED                        │"
+        echo "├─────────────────────────────────────────────────────────────┤"
+        echo "│ 🆔 Sync ID: ${{ env.SYNC_ID }}                   │"
+        echo "│ 📅 Date: ${{ env.SYNC_TIMESTAMP }}                    │"
+        echo "│ 🔄 Mode: ${{ env.SYNC_MODE }}                           │"
+        echo "│ 📦 Version: ${{ env.WORKFLOW_VERSION }}                            │"
+        echo "│ 🎯 Status: $([ "${{ steps.analyze.outputs.has_changes }}" == "true" ] && echo "✅ Updated" || echo "ℹ️ No changes")                                 │"
+        echo "│ 📊 Changes: ${{ steps.analyze.outputs.total_changes || 0 }} files affected                          │"
+        echo "└─────────────────────────────────────────────────────────────┘"
+        echo ""
+        echo "🚀 Next sync scheduled for tomorrow at 02:00 UTC"
+        echo "⚡ Manual sync available via workflow dispatch"
