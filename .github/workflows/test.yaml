@@ -78,8 +78,11 @@ jobs:
       - name: 🏗️ Generate build matrix
         id: matrix
         run: |
+          set -x
           custom_arch="${{ github.event.inputs.custom_arch }}"
           custom_branch="${{ github.event.inputs.custom_branch }}"
+          echo "custom_arch=$custom_arch"
+          echo "custom_branch=$custom_branch"
 
           # Define architectures
           declare -a archs=(
