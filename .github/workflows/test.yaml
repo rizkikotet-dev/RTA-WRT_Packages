@@ -185,7 +185,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential libncurses5-dev zlib1g-dev gawk git \
             gettext libssl-dev xsltproc wget unzip python3 rsync \
-            file python3-distutils python3-minimal libpython3-stdlib \
+            file python3-minimal libpython3-stdlib \
             ca-certificates curl jq
           echo "::endgroup::"
           
