@@ -142,54 +142,6 @@ jobs:
             echo "Browse and download packages directly from the [releases branch](https://github.com/${{ github.repository }}/tree/releases/packages)."
           } > README.md
 
-      - name: Setup Git LFS and optimize repository
-        run: |
-          # Install and configure Git LFS
-          git lfs install
-          
-          # Configure Git for large files
-          git config http.postBuffer 524288000
-          git config http.maxRequestBuffer 100M
-          git config core.compression 0
-          
-          # Track large files with LFS
-          echo "*.ipk filter=lfs diff=lfs merge=lfs -text" >> .gitattributes
-          echo "*.apk filter=lfs diff=lfs merge=lfs -text" >> .gitattributes
-          echo "*.tar.gz filter=lfs diff=lfs merge=lfs -text" >> .gitattributes
-          
-          # Add .gitattributes if it doesn't exist
-          if [ ! -f .gitattributes ]; then
-            git add .gitattributes
-            git commit -m "Add Git LFS configuration" || true
-          fi
-
-      - name: Clean up old packages (keep last 5 builds per arch)
-        run: |
-          # Clean up old packages to prevent repository from growing too large
-          for branch_dir in packages/*; do
-            if [ -d "$branch_dir" ]; then
-              branch=$(basename "$branch_dir")
-              echo "Cleaning up old packages for branch: $branch"
-              
-              for arch_dir in "$branch_dir"/*; do
-                if [ -d "$arch_dir" ]; then
-                  arch=$(basename "$arch_dir")
-                  
-                  # Keep only latest packages (remove old versions)
-                  cd "$arch_dir"
-                  
-                  # Group packages by name and keep only latest version
-                  for pkg_pattern in $(ls *.ipk *.apk 2>/dev/null | sed 's/_[0-9].*//' | sort -u); do
-                    # Keep only the newest version of each package
-                    ls -t ${pkg_pattern}_* 2>/dev/null | tail -n +2 | xargs rm -f
-                  done
-                  
-                  cd - > /dev/null
-                fi
-              done
-            fi
-          done
-
       - name: Commit and push changes in batches
         run: |
           # Check repository size
