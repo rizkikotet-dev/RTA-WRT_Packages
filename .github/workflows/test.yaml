@@ -22,11 +22,21 @@ jobs:
           git config --global user.name "OpenWRT Package Builder"
           git config --global pull.rebase true
 
-      - name: Download artifacts from specific run
-        uses: actions/download-artifact@v4
-        with:
-          artifact-ids: 15803121933
-          path: artifacts
+      - name: Download artifacts with error handling
+        run: |
+          set -e
+          
+          # Download menggunakan GitHub CLI
+          if gh run download 15803121933 --repo rizkikotet-dev/RTA-WRT_Packages --dir ./artifacts; then
+            echo "✅ Artifacts downloaded successfully"
+            ls -la ./artifacts
+          else
+            echo "❌ Failed to download artifacts"
+            echo "Checking available artifacts..."
+            gh api repos/rizkikotet-dev/RTA-WRT_Packages/actions/runs/15803121933/artifacts
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Process artifacts
         run: |
