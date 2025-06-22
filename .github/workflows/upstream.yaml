@@ -40,7 +40,7 @@ env:
   KWRT_REPO_URL: https://github.com/kiddin9/kwrt-packages
   PACKAGES_DIR: packages
   WORKFLOW_VERSION: "2.1.0"
-  MANUAL_PACKAGES_FILE: ".manual-packages"
+  MANUAL_PACKAGES_FILE: ".name-packages"
   SYNC_METADATA_FILE: ".sync-metadata.json"
   
   # 🎨 Styling
@@ -157,11 +157,11 @@ jobs:
           -printf "%f\n" 2>/dev/null | sort > .sync-metadata/current-packages.txt || echo > .sync-metadata/current-packages.txt
         
         # Load manual packages list (excluding comments and empty lines)
-        grep -v '^#\|^$' "${{ env.MANUAL_PACKAGES_FILE }}" 2>/dev/null | sort > .sync-metadata/manual-packages.txt || echo > .sync-metadata/manual-packages.txt
+        grep -v '^#\|^$' "${{ env.MANUAL_PACKAGES_FILE }}" 2>/dev/null | sort > .sync-metadata/main-packages.txt || echo > .sync-metadata/main-packages.txt
         
         # Show inventory summary
         CURRENT_COUNT=$(wc -l < .sync-metadata/current-packages.txt)
-        MANUAL_COUNT=$(wc -l < .sync-metadata/manual-packages.txt)
+        MANUAL_COUNT=$(wc -l < .sync-metadata/main-packages.txt)
         
         echo "📊 Package Inventory:"
         echo "  📦 Current packages: $CURRENT_COUNT"
@@ -169,7 +169,7 @@ jobs:
         
         if [ $MANUAL_COUNT -gt 0 ]; then
           echo "🔒 Protected packages list:"
-          sed 's/^/    - /' .sync-metadata/manual-packages.txt
+          sed 's/^/    - /' .sync-metadata/main-packages.txt
         fi
         
         # Preserve important files
@@ -287,7 +287,7 @@ jobs:
                 PACKAGE_PATH="${{ env.PACKAGES_DIR }}/$package"
                 if [ -e "$PACKAGE_PATH" ]; then
                   # Check if package is protected
-                  if ! grep -Fxq "$package" .sync-metadata/manual-packages.txt; then
+                  if ! grep -Fxq "$package" .sync-metadata/main-packages.txt; then
                     echo "🗑️ Removing unprotected package: $package"
                     rm -rf "$PACKAGE_PATH"
                   else
@@ -305,7 +305,7 @@ jobs:
             while IFS= read -r package; do
               if [ -n "$package" ]; then
                 # Check if package is protected before updating
-                if ! grep -Fxq "$package" .sync-metadata/manual-packages.txt; then
+                if ! grep -Fxq "$package" .sync-metadata/main-packages.txt; then
                   echo "🔄 Updating existing package: $package"
                   rm -rf "${{ env.PACKAGES_DIR }}/$package"
                 else
@@ -329,7 +329,7 @@ jobs:
                 PACKAGE_PATH="${{ env.PACKAGES_DIR }}/$package"
                 if [ -e "$PACKAGE_PATH" ]; then
                   # Check if package is protected
-                  if ! grep -Fxq "$package" .sync-metadata/manual-packages.txt; then
+                  if ! grep -Fxq "$package" .sync-metadata/main-packages.txt; then
                     # Check if package exists in source (will be replaced)
                     if grep -Fxq "$package" .sync-metadata/source-packages.txt; then
                       echo "🔄 Replacing package: $package"
@@ -356,7 +356,7 @@ jobs:
               DEST_PATH="${{ env.PACKAGES_DIR }}/$PACKAGE_NAME"
               
               # Check if destination exists and is protected
-              if [ -e "$DEST_PATH" ] && grep -Fxq "$PACKAGE_NAME" .sync-metadata/manual-packages.txt 2>/dev/null; then
+              if [ -e "$DEST_PATH" ] && grep -Fxq "$PACKAGE_NAME" .sync-metadata/main-packages.txt 2>/dev/null; then
                 echo "🔒 Skipping protected package: $PACKAGE_NAME"
                 SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
               else
@@ -489,7 +489,7 @@ jobs:
           echo "  📈 Total: $TOTAL_CHANGES"
           
           # Show protected packages info
-          PROTECTED_COUNT=$(wc -l < .sync-metadata/manual-packages.txt 2>/dev/null || echo 0)
+          PROTECTED_COUNT=$(wc -l < .sync-metadata/main-packages.txt 2>/dev/null || echo 0)
           echo "  🔒 Protected: $PROTECTED_COUNT packages"
         fi
 
@@ -505,7 +505,7 @@ jobs:
         # Generate smart commit message
         MAGNITUDE="${{ steps.analyze.outputs.change_magnitude || 'forced' }}"
         TOTAL_CHANGES="${{ steps.analyze.outputs.total_changes || '0' }}"
-        PROTECTED_COUNT=$(wc -l < .sync-metadata/manual-packages.txt 2>/dev/null || echo 0)
+        PROTECTED_COUNT=$(wc -l < .sync-metadata/main-packages.txt 2>/dev/null || echo 0)
         
         case "$MAGNITUDE" in
           "major")
@@ -566,7 +566,7 @@ jobs:
         echo "📊 Generating comprehensive sync report..."
         
         # Load statistics
-        PROTECTED_COUNT=$(wc -l < .sync-metadata/manual-packages.txt 2>/dev/null || echo 0)
+        PROTECTED_COUNT=$(wc -l < .sync-metadata/main-packages.txt 2>/dev/null || echo 0)
         CURRENT_COUNT=$(find ${{ env.PACKAGES_DIR }} -maxdepth 1 -not -name '.*' -not -name ${{ env.PACKAGES_DIR }} | wc -l)
         
         # Determine status
@@ -623,7 +623,7 @@ jobs:
             if [ -n "$package" ]; then
               echo "- \`$package\`" >> $GITHUB_STEP_SUMMARY
             fi
-          done < .sync-metadata/manual-packages.txt
+          done < .sync-metadata/main-packages.txt
           
           cat >> $GITHUB_STEP_SUMMARY << EOF
         
@@ -709,7 +709,7 @@ jobs:
         echo "│ 📦 Version: ${{ env.WORKFLOW_VERSION }}                            │"
         echo "│ 🎯 Status: $([ "${{ steps.analyze.outputs.has_changes }}" == "true" ] && echo "✅ Updated" || echo "ℹ️ No changes")                                 │"
         echo "│ 📊 Changes: ${{ steps.analyze.outputs.total_changes || 0 }} files affected                          │"
-        echo "│ 🔒 Protected: $(wc -l < .sync-metadata/manual-packages.txt 2>/dev/null || echo 0) packages preserved                       │"
+        echo "│ 🔒 Protected: $(wc -l < .sync-metadata/main-packages.txt 2>/dev/null || echo 0) packages preserved                       │"
         echo "└─────────────────────────────────────────────────────────────┘"
         echo ""
         echo "🔒 Manual/contributed packages are preserved during sync"
