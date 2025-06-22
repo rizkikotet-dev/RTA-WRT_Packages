@@ -133,7 +133,7 @@ jobs:
               branch=${metadata##*_}
             else
               echo "⚠️ Could not parse artifact name: $artifact_name, skipping"
-              ((failed_artifacts++))
+              failed_artifacts=$((failed_artifacts + 1))
               continue
             fi
             
@@ -145,7 +145,7 @@ jobs:
             mkdir -p "$target_dir"
             
             # Find and copy packages with multiple search patterns
-            package_count=0
+            package_copied=false
             for search_path in \
               "$artifact_dir/releases/$branch/$arch" \
               "$artifact_dir/$branch/$arch" \
@@ -156,24 +156,28 @@ jobs:
                 echo "  Found packages in: $search_path"
                 
                 # Copy packages efficiently
-                find "$search_path" -name "*.ipk" -o -name "*.apk" | while read -r package; do
-                  if [ -f "$package" ]; then
-                    cp "$package" "$target_dir/" && ((package_count++))
-                  fi
-                done
+                package_files=$(find "$search_path" -name "*.ipk" -o -name "*.apk" 2>/dev/null || true)
+                if [ -n "$package_files" ]; then
+                  echo "$package_files" | while IFS= read -r package; do
+                    if [ -f "$package" ]; then
+                      cp "$package" "$target_dir/" 2>/dev/null || echo "    ⚠️ Failed to copy: $(basename "$package")"
+                    fi
+                  done
+                  package_copied=true
+                fi
                 break
               fi
             done
             
             # Verify packages were copied
-            actual_count=$(find "$target_dir" -name "*.ipk" -o -name "*.apk" | wc -l)
+            actual_count=$(find "$target_dir" -name "*.ipk" -o -name "*.apk" 2>/dev/null | wc -l)
             if [ "$actual_count" -eq 0 ]; then
               echo "  ⚠️ No packages found for $arch/$branch"
               rmdir "$target_dir" 2>/dev/null || true
               rmdir "packages/$branch" 2>/dev/null || true
             else
               echo "  ✅ Processed $actual_count packages for $arch/$branch"
-              ((total_processed += actual_count))
+              total_processed=$((total_processed + actual_count))
             fi
           done
           
