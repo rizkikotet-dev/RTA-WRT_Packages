@@ -38,7 +38,7 @@
 </tr>
 </table>
 
-> 🕐 **Last updated**: 2025-06-22 16:53:20 UTC
+> 🕐 **Last updated**: 2025-06-22 18:04:59 UTC
 
 ## 🌿 Supported OpenWRT Versions
 
@@ -107,7 +107,7 @@
 
 ```bash
 # Add custom repository (replace [BRANCH] and [ARCH] with your values)
-echo "src/gz custom_packages https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/releases/packages/[BRANCH]/[ARCH]" >> /etc/opkg/customfeeds.conf
+echo "src/gz custom_packages https://raw.githubusercontent.com/rizkikotet-dev/RTA-WRT_Packages/releases/packages/[BRANCH]/[ARCH]" >> /etc/opkg/customfeeds.conf
 
 # Update package lists
 opkg update
@@ -129,7 +129,7 @@ ARCH=$(opkg print-architecture | awk 'NR==2{print $2}')
 BRANCH="openwrt-23.05"  # or openwrt-24.10, SNAPSHOT
 
 # Add repository
-echo "src/gz custom_packages https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/releases/packages/$BRANCH/$ARCH" > /etc/opkg/customfeeds.conf
+echo "src/gz custom_packages https://raw.githubusercontent.com/rizkikotet-dev/RTA-WRT_Packages/releases/packages/$BRANCH/$ARCH" > /etc/opkg/customfeeds.conf
 
 # Update and install
 opkg update
@@ -211,8 +211,6 @@ opkg print-architecture
 ```bash
 # Verify repository URL is correct
 cat /etc/opkg/customfeeds.conf
-# Test connectivity
-wget -q --spider [repository_url]/Packages.gz
 ```
 
 </details>
@@ -221,13 +219,13 @@ wget -q --spider [repository_url]/Packages.gz
 
 <div align="center">
   <a href="../../actions">
-    <img src="https://img.shields.io/github/actions/workflow/status/YOUR_USERNAME/YOUR_REPO/build.yml?branch=main&style=for-the-badge&logo=github-actions" alt="Build Status">
+    <img src="https://img.shields.io/github/actions/workflow/status/rizkikotet-dev/RTA-WRT_Packages/build.yml?branch=main&style=for-the-badge&logo=github-actions" alt="Build Status">
   </a>
   <a href="../../releases">
-    <img src="https://img.shields.io/github/v/release/YOUR_USERNAME/YOUR_REPO?style=for-the-badge&logo=github" alt="Latest Release">
+    <img src="https://img.shields.io/github/v/release/rizkikotet-dev/RTA-WRT_Packages?style=for-the-badge&logo=github" alt="Latest Release">
   </a>
   <a href="../../commits/main">
-    <img src="https://img.shields.io/github/last-commit/YOUR_USERNAME/YOUR_REPO?style=for-the-badge&logo=git" alt="Last Commit">
+    <img src="https://img.shields.io/github/last-commit/rizkikotet-dev/RTA-WRT_Packages?style=for-the-badge&logo=git" alt="Last Commit">
   </a>
 </div>
 
@@ -259,5 +257,5 @@ This repository contains packages from various sources. Each package maintains i
 </div>
 
 <div align="center">
-  <sub>Built with ❤️ using GitHub Actions • Powered by OpenWRT</sub>
+  <sub>Built with ❤️ using GitHub Actions • Powered by OpenWRT | RizkiKotet</sub>
 </div>
