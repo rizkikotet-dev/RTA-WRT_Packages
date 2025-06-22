@@ -22,9 +22,10 @@ jobs:
           git config --global user.name "OpenWRT Package Builder"
           git config --global pull.rebase true
 
-      - name: Download artifacts
+      - name: Download artifacts from different workflow
         uses: actions/download-artifact@v4
         with:
+          workflow: build.yml
           path: artifacts
 
       - name: Process artifacts
