@@ -507,6 +507,7 @@ jobs:
           echo "::endgroup::"
 
       - name: 📊 Generate advanced repository metadata
+        id: generate_metadata
         run: |
           echo "::group::📊 Generating metadata"
           
@@ -515,6 +516,12 @@ jobs:
           total_branches=$(find packages -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
           total_archs=$(find packages -mindepth 2 -maxdepth 2 -type d 2>/dev/null | wc -l)
           repo_size_mb=$(du -sm packages 2>/dev/null | cut -f1)
+          
+          # Store metadata for later use
+          echo "total_packages=$total_packages" >> $GITHUB_OUTPUT
+          echo "total_branches=$total_branches" >> $GITHUB_OUTPUT
+          echo "total_archs=$total_archs" >> $GITHUB_OUTPUT
+          echo "repo_size_mb=$repo_size_mb" >> $GITHUB_OUTPUT
           
           # Create comprehensive repository metadata
           cat > packages/repository.json <<EOF
