@@ -126,7 +126,7 @@ jobs:
                 matrix_json+=','
               fi
               matrix_json+="{\"arch\":\"$arch\",\"branch\":\"$branch\",\"stable\":$([ "$branch" != "SNAPSHOT" ] && echo "true" || echo "false")}"
-              ((total_jobs++))
+              total_jobs=$((total_jobs + 1))
               echo "total_jobs after increment: $total_jobs"
             done
           done
