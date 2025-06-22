@@ -1,117 +1,13 @@
-name: Build and Release OpenWRT Packages
+name: Release OpenWRT Packages
 
 on:
   workflow_dispatch:
 
 jobs:
-  build:
-    name: Build ${{ matrix.arch }} (${{ matrix.branch }})
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    strategy:
-      fail-fast: false
-      matrix:
-        arch:
-          - arm_cortex-a5_vfpv4
-          - arm_cortex-a7_neon-vfpv4
-          - arm_cortex-a8_vfpv3
-          - arm_cortex-a9
-          - arm_cortex-a9_vfpv3-d16
-          - arm_cortex-a9_neon
-          - arm_cortex-a15_neon-vfpv4
-          - aarch64_cortex-a53
-          - aarch64_cortex-a72
-          - aarch64_cortex-a76
-          - aarch64_generic
-          - mips_24kc
-          - mips_4kec
-          - mips_mips32
-          - mipsel_24kc
-          - mipsel_24kc_24kf
-          - mipsel_74kc
-          - mipsel_mips32
-          - mips64_octeonplus
-          - i386_pentium4
-          - x86_64
-        branch:
-          - openwrt-23.05
-          - openwrt-24.10
-          - SNAPSHOT
-        exclude:
-          - arch: aarch64_cortex-a76
-            branch: openwrt-23.05
-
-    steps:
-      - name: Checkout source code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup build environment
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential libncurses5-dev zlib1g-dev gawk git gettext libssl-dev xsltproc wget unzip python3
-
-      - name: Build packages with OpenWRT SDK
-        uses: openwrt/gh-action-sdk@main
-        env:
-          ARCH: ${{ matrix.arch }}
-          BRANCH: ${{ matrix.branch }}
-          FEEDNAME: custom_packages
-          FEED_DIR: ./packages/
-          INDEX: 1
-          NO_REFRESH_CHECK: true
-          IGNORE_ERRORS: true
-
-      - name: Verify build artifacts
-        run: |
-          if [ ! -d "bin/packages/${{ matrix.arch }}/custom_packages" ]; then
-            echo "::warning::No packages were built for ${{ matrix.arch }} (${{ matrix.branch }})"
-            exit 0
-          fi
-
-      - name: Organize packages
-        run: |
-          # Create structured output directory
-          OUTPUT_DIR="releases/${{ matrix.branch }}/${{ matrix.arch }}"
-          mkdir -p "$OUTPUT_DIR"
-          
-          # Copy packages with verification
-          if [ -d "bin/packages/${{ matrix.arch }}/custom_packages" ]; then
-            rsync -av --ignore-missing-args \
-              "bin/packages/${{ matrix.arch }}/custom_packages/" \
-              "$OUTPUT_DIR/"
-          fi
-          
-          # Generate simple manifest
-          {
-            echo "# Package Manifest"
-            echo "Architecture: ${{ matrix.arch }}"
-            echo "OpenWRT Version: ${{ matrix.branch }}"
-            echo "Build Date: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-            echo ""
-            echo "## Packages"
-            find "$OUTPUT_DIR" -type f -name '*.ipk' -o -name '*.apk' | sort | sed 's|.*/||'
-          } > "$OUTPUT_DIR/MANIFEST.md"
-
-      - name: Create compressed archive
-        run: |
-          tar -czf "packages_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz" \
-            -C "releases/${{ matrix.branch }}/${{ matrix.arch }}" .
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: packages_${{ matrix.arch }}-${{ matrix.branch }}
-          path: |
-            releases/${{ matrix.branch }}/${{ matrix.arch }}/*
-            packages_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz
-
   release:
     name: Publish Packages
     needs: build
     runs-on: ubuntu-latest
-    if: always() && (needs.build.result == 'success' || needs.build.result == 'failure')
     
     steps:
       - name: Checkout releases branch
