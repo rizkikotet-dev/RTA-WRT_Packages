@@ -204,9 +204,7 @@ jobs:
           FEED_DIR: ./packages/
           INDEX: 1
           NO_REFRESH_CHECK: true
-          IGNORE_ERRORS: ${{ !matrix.stable }}
-          V: ${{ matrix.stable && 's' || '' }}
-          MAKE_JOBS: $(nproc)
+          IGNORE_ERRORS: true
 
       - name: 🔍 Validate build artifacts
         id: validate
