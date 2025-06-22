@@ -349,22 +349,27 @@ jobs:
         INSTALLED_COUNT=0
         SKIPPED_COUNT=0
         
-        find .sync-staging -maxdepth 1 -not -name '.*' -not -name .sync-staging | while read -r item; do
-          if [ -n "$item" ]; then
-            PACKAGE_NAME=$(basename "$item")
-            DEST_PATH="${{ env.PACKAGES_DIR }}/$PACKAGE_NAME"
-            
-            # Check if destination exists and is protected
-            if [ -e "$DEST_PATH" ] && grep -Fxq "$PACKAGE_NAME" .sync-metadata/manual-packages.txt; then
-              echo "🔒 Skipping protected package: $PACKAGE_NAME"
-              SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
-            else
-              echo "✅ Installing package: $PACKAGE_NAME"
-              mv "$item" "$DEST_PATH"
-              INSTALLED_COUNT=$((INSTALLED_COUNT + 1))
+        if [ -d .sync-staging ]; then
+          for item in .sync-staging/*; do
+            if [ -e "$item" ] && [ "$item" != ".sync-staging/*" ]; then
+              PACKAGE_NAME=$(basename "$item")
+              DEST_PATH="${{ env.PACKAGES_DIR }}/$PACKAGE_NAME"
+              
+              # Check if destination exists and is protected
+              if [ -e "$DEST_PATH" ] && grep -Fxq "$PACKAGE_NAME" .sync-metadata/manual-packages.txt 2>/dev/null; then
+                echo "🔒 Skipping protected package: $PACKAGE_NAME"
+                SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+              else
+                echo "✅ Installing package: $PACKAGE_NAME"
+                if mv "$item" "$DEST_PATH" 2>/dev/null; then
+                  INSTALLED_COUNT=$((INSTALLED_COUNT + 1))
+                else
+                  echo "⚠️ Failed to move package: $PACKAGE_NAME"
+                fi
+              fi
             fi
-          fi
-        done
+          done
+        fi
         
         # Restore preserved files
         if [ -f .sync-metadata/.gitkeep.backup ]; then
@@ -396,39 +401,71 @@ jobs:
       run: |
         echo "🔬 Performing advanced change analysis..."
         
-        # Detailed git analysis
-        if [[ -n $(git status --porcelain) ]]; then
+        # Check for git changes
+        git add -A
+        
+        # Detailed git analysis with error handling
+        if git diff --cached --quiet; then
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+          echo "total_changes=0" >> $GITHUB_OUTPUT
+          echo "change_magnitude=none" >> $GITHUB_OUTPUT
+          echo "ℹ️ No changes detected - repository is up to date"
+        else
           echo "🎯 Changes detected!"
           echo "has_changes=true" >> $GITHUB_OUTPUT
           
-          # Comprehensive change analysis with bulletproof counting
+          # Initialize counters
           ADDED=0
           MODIFIED=0
           DELETED=0
           RENAMED=0
           UNTRACKED=0
           
-          # Count each type of change safely
-          while IFS= read -r line; do
-            case "${line:0:2}" in
-              "A ") ((ADDED++)) ;;
-              "M ") ((MODIFIED++)) ;;
-              "D ") ((DELETED++)) ;;
-              "R ") ((RENAMED++)) ;;
-              "??") ((UNTRACKED++)) ;;
-            esac
-          done < <(git status --porcelain)
+          # Safe change counting with error handling
+          if git status --porcelain > /tmp/git_status.txt 2>/dev/null; then
+            while IFS= read -r line || [ -n "$line" ]; do
+              if [ -n "$line" ]; then
+                case "${line:0:2}" in
+                  "A "|\
+                  "AM") ADDED=$((ADDED + 1)) ;;
+                  "M "|\
+                  "MM"|\
+                  " M") MODIFIED=$((MODIFIED + 1)) ;;
+                  "D "|\
+                  " D") DELETED=$((DELETED + 1)) ;;
+                  "R "|\
+                  "RM") RENAMED=$((RENAMED + 1)) ;;
+                  "??"|\
+                  "A ") UNTRACKED=$((UNTRACKED + 1)) ;;
+                esac
+              fi
+            done < /tmp/git_status.txt
+            
+            # Clean up temp file
+            rm -f /tmp/git_status.txt
+          else
+            # Fallback: count all changes as modified
+            MODIFIED=$(git diff --cached --name-only | wc -l)
+            echo "⚠️ Using fallback change detection"
+          fi
           
-          # Calculate total changes
+          # Calculate total changes safely
           TOTAL_CHANGES=$((ADDED + MODIFIED + DELETED + RENAMED + UNTRACKED))
           
-          # Set outputs
-          echo "added=$ADDED" >> $GITHUB_OUTPUT
-          echo "modified=$MODIFIED" >> $GITHUB_OUTPUT
-          echo "deleted=$DELETED" >> $GITHUB_OUTPUT
-          echo "renamed=$RENAMED" >> $GITHUB_OUTPUT
-          echo "untracked=$UNTRACKED" >> $GITHUB_OUTPUT
-          echo "total_changes=$TOTAL_CHANGES" >> $GITHUB_OUTPUT
+          # Ensure we have at least 1 change if git detected changes
+          if [ $TOTAL_CHANGES -eq 0 ]; then
+            TOTAL_CHANGES=1
+            MODIFIED=1
+            echo "⚠️ Adjusted change count to reflect detected modifications"
+          fi
+          
+          # Set outputs safely
+          echo "added=${ADDED}" >> $GITHUB_OUTPUT
+          echo "modified=${MODIFIED}" >> $GITHUB_OUTPUT
+          echo "deleted=${DELETED}" >> $GITHUB_OUTPUT
+          echo "renamed=${RENAMED}" >> $GITHUB_OUTPUT
+          echo "untracked=${UNTRACKED}" >> $GITHUB_OUTPUT
+          echo "total_changes=${TOTAL_CHANGES}" >> $GITHUB_OUTPUT
           
           # Determine change magnitude
           if [ $TOTAL_CHANGES -gt 100 ]; then
@@ -454,12 +491,6 @@ jobs:
           # Show protected packages info
           PROTECTED_COUNT=$(wc -l < .sync-metadata/manual-packages.txt 2>/dev/null || echo 0)
           echo "  🔒 Protected: $PROTECTED_COUNT packages"
-          
-        else
-          echo "has_changes=false" >> $GITHUB_OUTPUT
-          echo "total_changes=0" >> $GITHUB_OUTPUT
-          echo "change_magnitude=none" >> $GITHUB_OUTPUT
-          echo "ℹ️ No changes detected - repository is up to date"
         fi
 
     - name: 🚀 Smart Commit & Deploy
