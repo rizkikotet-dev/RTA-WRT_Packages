@@ -260,14 +260,21 @@ jobs:
           echo "🎯 Changes detected!"
           echo "has_changes=true" >> $GITHUB_OUTPUT
           
-          # Comprehensive change analysis
-          ADDED=$(git status --porcelain | grep -c "^A" || echo "0")
-          MODIFIED=$(git status --porcelain | grep -c "^M" || echo "0")
-          DELETED=$(git status --porcelain | grep -c "^D" || echo "0")
-          RENAMED=$(git status --porcelain | grep -c "^R" || echo "0")
-          UNTRACKED=$(git status --porcelain | grep -c "^??" || echo "0")
+          # Comprehensive change analysis with safe defaults
+          ADDED=$(git status --porcelain | grep -c "^A" 2>/dev/null || echo "0")
+          MODIFIED=$(git status --porcelain | grep -c "^M" 2>/dev/null || echo "0")
+          DELETED=$(git status --porcelain | grep -c "^D" 2>/dev/null || echo "0")
+          RENAMED=$(git status --porcelain | grep -c "^R" 2>/dev/null || echo "0")
+          UNTRACKED=$(git status --porcelain | grep -c "^??" 2>/dev/null || echo "0")
           
-          # Calculate change metrics
+          # Ensure all variables have valid numeric values
+          ADDED=${ADDED:-0}
+          MODIFIED=${MODIFIED:-0}
+          DELETED=${DELETED:-0}
+          RENAMED=${RENAMED:-0}
+          UNTRACKED=${UNTRACKED:-0}
+          
+          # Calculate change metrics safely
           TOTAL_CHANGES=$((ADDED + MODIFIED + DELETED + RENAMED + UNTRACKED))
           
           # Set outputs
