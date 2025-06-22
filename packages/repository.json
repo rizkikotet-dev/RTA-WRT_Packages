@@ -1,22 +1,35 @@
 {
   "repository": {
-    "name": "OpenWRT Custom Packages",
-    "version": "1.0",
-    "updated": "2025-06-22T13:17:41Z",
+    "name": "🚀 OpenWRT Custom Packages",
+    "description": "Pre-built OpenWRT packages for multiple architectures and versions",
+    "version": "2.0.0",
+    "updated": "2025-06-22T16:42:42Z",
     "statistics": {
-      "total_packages": 6187,
+      "total_packages": 4456,
       "total_branches": 3,
-      "total_architectures": 61,
-      "repository_size_mb": 1134
+      "total_architectures": 44,
+      "repository_size_mb": 818,
+      "last_build_packages": 0
     },
     "branches": [
+  "23.05",
   "24.10",
-  "SNAPSHOT",
-  "23.05"
+  "SNAPSHOT"
 ],
-    "workflow": {
-      "run_id": "15806997807",
-      "source_repo": "rizkikotet-dev/RTA-WRT_Packages"
+    "architectures": [
+  "23.05",
+  "24.10",
+  "SNAPSHOT"
+],
+    "build_info": {
+      "workflow_run_id": "15808695955",
+      "commit_sha": "53cc9b3d634d3fed86d8b059d93140c229d54024",
+      "trigger": "workflow_dispatch",
+      "source_repository": "rizkikotet-dev/RTA-WRT_Packages"
+    },
+    "usage": {
+      "opkg_source": "src/gz custom_packages https://raw.githubusercontent.com/rizkikotet-dev/RTA-WRT_Packages/releases/packages/[BRANCH]/[ARCH]",
+      "browse_url": "https://github.com/rizkikotet-dev/RTA-WRT_Packages/tree/releases/packages"
     }
   }
 }

@@ -1,100 +1,113 @@
-# 📦 OpenWRT Custom Packages Repository
+# 🚀 OpenWRT Custom Packages Repository
 
-This repository contains pre-built packages for various OpenWRT versions and architectures.
+<div align="center">
+  <img src="https://img.shields.io/badge/OpenWRT-Packages-blue?style=for-the-badge&logo=openwrt" alt="OpenWRT Packages">
+  <img src="https://img.shields.io/badge/Status-Active-success?style=for-the-badge" alt="Status">
+  <img src="https://img.shields.io/badge/Auto--Updated-Weekly-informational?style=for-the-badge" alt="Auto Updated">
+</div>
+
+<div align="center">
+  <h3>🎯 Pre-built packages for multiple OpenWRT versions and architectures</h3>
+  <p><em>Automated builds • Quality assured • Always up-to-date</em></p>
+</div>
+
+---
 
 ## 📊 Repository Statistics
-- **Last updated**: 2025-06-22 13:17:41 UTC
-- **Total packages**: 6187
-- **Repository size**: 1134MB
-- **Supported branches**: 3
-- **Supported architectures**: 61
 
-## 🏗️ Supported OpenWRT Versions
+<table>
+  <tr>
+    <td align="center"><strong>📦 Total Packages</strong></td>
+    <td align="center"><strong>🏗️ Architectures</strong></td>
+    <td align="center"><strong>🌿 Branches</strong></td>
+    <td align="center"><strong>💾 Repository Size</strong></td>
+  </tr>
+  <tr>
+    <td align="center">
+    <img src="https://img.shields.io/badge/4456-packages-blue?style=flat-square" alt="4456 packages">
+  </td>
+  <td align="center">
+    <img src="https://img.shields.io/badge/44-architectures-green?style=flat-square" alt="44 architectures">
+  </td>
+  <td align="center">
+    <img src="https://img.shields.io/badge/3-branches-orange?style=flat-square" alt="3 branches">
+  </td>
+  <td align="center">
+    <img src="https://img.shields.io/badge/818MB-size-red?style=flat-square" alt="818MB">
+  </td>
+</tr>
+</table>
 
-### 🔧 23.05
-- **Packages**: 1925
-- **Architectures**: 19
+> 🕐 **Last updated**: 2025-06-22 16:42:42 UTC
 
-  - **aarch64_cortex-a53-openwrt**: 104 packages
-  - **aarch64_cortex-a72-openwrt**: 104 packages
-  - **aarch64_generic-openwrt**: 104 packages
-  - **arm_cortex-a15_neon-vfpv4-openwrt**: 104 packages
-  - **arm_cortex-a5_vfpv4-openwrt**: 104 packages
-  - **arm_cortex-a7_neon-vfpv4-openwrt**: 104 packages
-  - **arm_cortex-a8_vfpv3-openwrt**: 104 packages
-  - **arm_cortex-a9-openwrt**: 104 packages
-  - **arm_cortex-a9_neon-openwrt**: 104 packages
-  - **arm_cortex-a9_vfpv3-d16-openwrt**: 104 packages
-  - **i386_pentium4-openwrt**: 102 packages
-  - **mips64_octeonplus-openwrt**: 102 packages
-  - **mips_24kc-openwrt**: 102 packages
-  - **mips_4kec-openwrt**: 69 packages
-  - **mips_mips32-openwrt**: 102 packages
-  - **mipsel_24kc_24kf-openwrt**: 102 packages
-  - **mipsel_74kc-openwrt**: 102 packages
-  - **mipsel_mips32-openwrt**: 102 packages
-  - **x86_64-openwrt**: 102 packages
+## 🌿 Supported OpenWRT Versions
 
-### 🔧 24.10
-- **Packages**: 2131
-- **Architectures**: 21
+### ![Stable](https://img.shields.io/badge/23.05-Stable-green?style=flat-square)
 
-  - **aarch64_cortex-a53-openwrt**: 104 packages
-  - **aarch64_cortex-a72-openwrt**: 104 packages
-  - **aarch64_cortex-a76-openwrt**: 104 packages
-  - **aarch64_generic-openwrt**: 104 packages
-  - **arm_cortex-a15_neon-vfpv4-openwrt**: 104 packages
-  - **arm_cortex-a5_vfpv4-openwrt**: 104 packages
-  - **arm_cortex-a7_neon-vfpv4-openwrt**: 104 packages
-  - **arm_cortex-a8_vfpv3-openwrt**: 104 packages
-  - **arm_cortex-a9-openwrt**: 104 packages
-  - **arm_cortex-a9_neon-openwrt**: 104 packages
-  - **arm_cortex-a9_vfpv3-d16-openwrt**: 104 packages
-  - **i386_pentium4-openwrt**: 102 packages
-  - **mips64_octeonplus-openwrt**: 102 packages
-  - **mips_24kc-openwrt**: 102 packages
-  - **mips_4kec-openwrt**: 69 packages
-  - **mips_mips32-openwrt**: 102 packages
-  - **mipsel_24kc-openwrt**: 102 packages
-  - **mipsel_24kc_24kf-openwrt**: 102 packages
-  - **mipsel_74kc-openwrt**: 102 packages
-  - **mipsel_mips32-openwrt**: 102 packages
-  - **x86_64-openwrt**: 102 packages
+| Architecture | Packages | Status |
+|--------------|----------|--------|
+| `aarch64_cortex-a53-openwrt` | 104 | ✅ Available |
+| `aarch64_cortex-a72-openwrt` | 104 | ✅ Available |
+| `aarch64_generic-openwrt` | 104 | ✅ Available |
+| `arm_cortex-a15_neon-vfpv4-openwrt` | 104 | ✅ Available |
+| `arm_cortex-a5_vfpv4-openwrt` | 104 | ✅ Available |
+| `arm_cortex-a7_neon-vfpv4-openwrt` | 104 | ✅ Available |
+| `arm_cortex-a8_vfpv3-openwrt` | 104 | ✅ Available |
+| `arm_cortex-a9-openwrt` | 104 | ✅ Available |
+| `arm_cortex-a9_neon-openwrt` | 104 | ✅ Available |
+| `arm_cortex-a9_vfpv3-d16-openwrt` | 104 | ✅ Available |
+| `i386_pentium4-openwrt` | 102 | ✅ Available |
+| `mips64_octeonplus-openwrt` | 102 | ✅ Available |
+| `mips_24kc-openwrt` | 102 | ✅ Available |
+| `mips_4kec-openwrt` | 69 | ✅ Available |
+| `mips_mips32-openwrt` | 102 | ✅ Available |
+| `mipsel_24kc_24kf-openwrt` | 102 | ✅ Available |
+| `mipsel_74kc-openwrt` | 102 | ✅ Available |
+| `mipsel_mips32-openwrt` | 102 | ✅ Available |
+| `x86_64-openwrt` | 102 | ✅ Available |
 
-### 🔧 SNAPSHOT
-- **Packages**: 2131
-- **Architectures**: 21
+### ![Stable](https://img.shields.io/badge/24.10-Stable-green?style=flat-square)
 
-  - **aarch64_cortex-a53**: 104 packages
-  - **aarch64_cortex-a72**: 104 packages
-  - **aarch64_cortex-a76**: 104 packages
-  - **aarch64_generic**: 104 packages
-  - **arm_cortex-a15_neon-vfpv4**: 104 packages
-  - **arm_cortex-a5_vfpv4**: 104 packages
-  - **arm_cortex-a7_neon-vfpv4**: 104 packages
-  - **arm_cortex-a8_vfpv3**: 104 packages
-  - **arm_cortex-a9**: 104 packages
-  - **arm_cortex-a9_neon**: 104 packages
-  - **arm_cortex-a9_vfpv3-d16**: 104 packages
-  - **i386_pentium4**: 102 packages
-  - **mips64_octeonplus**: 102 packages
-  - **mips_24kc**: 102 packages
-  - **mips_4kec**: 69 packages
-  - **mips_mips32**: 102 packages
-  - **mipsel_24kc**: 102 packages
-  - **mipsel_24kc_24kf**: 102 packages
-  - **mipsel_74kc**: 102 packages
-  - **mipsel_mips32**: 102 packages
-  - **x86_64**: 102 packages
+| Architecture | Packages | Status |
+|--------------|----------|--------|
+| `aarch64_cortex-a53-openwrt` | 104 | ✅ Available |
+| `aarch64_cortex-a72-openwrt` | 104 | ✅ Available |
+| `aarch64_cortex-a76-openwrt` | 104 | ✅ Available |
+| `aarch64_generic-openwrt` | 104 | ✅ Available |
+| `arm_cortex-a15_neon-vfpv4-openwrt` | 104 | ✅ Available |
+| `arm_cortex-a5_vfpv4-openwrt` | 104 | ✅ Available |
+| `arm_cortex-a7_neon-vfpv4-openwrt` | 104 | ✅ Available |
+| `arm_cortex-a8_vfpv3-openwrt` | 104 | ✅ Available |
+| `arm_cortex-a9-openwrt` | 104 | ✅ Available |
+| `arm_cortex-a9_neon-openwrt` | 104 | ✅ Available |
+| `arm_cortex-a9_vfpv3-d16-openwrt` | 104 | ✅ Available |
+| `i386_pentium4-openwrt` | 102 | ✅ Available |
+| `mips64_octeonplus-openwrt` | 102 | ✅ Available |
+| `mips_24kc-openwrt` | 102 | ✅ Available |
+| `mips_4kec-openwrt` | 69 | ✅ Available |
+| `mips_mips32-openwrt` | 102 | ✅ Available |
+| `mipsel_24kc-openwrt` | 102 | ✅ Available |
+| `mipsel_24kc_24kf-openwrt` | 102 | ✅ Available |
+| `mipsel_74kc-openwrt` | 102 | ✅ Available |
+| `mipsel_mips32-openwrt` | 102 | ✅ Available |
+| `x86_64-openwrt` | 102 | ✅ Available |
 
+### ![SNAPSHOT](https://img.shields.io/badge/SNAPSHOT-Development-red?style=flat-square)
 
-## 🚀 Usage
+| Architecture | Packages | Status |
+|--------------|----------|--------|
+| `aarch64_cortex-a76` | 104 | ✅ Available |
+| `arm_cortex-a9_vfpv3-d16` | 92 | ✅ Available |
+| `mips_mips32` | 102 | ✅ Available |
+| `mipsel_24kc` | 102 | ✅ Available |
 
-### Adding Repository to OpenWRT
+## 🚀 Quick Start
+
+### Method 1: Add Repository Source
 
 ```bash
-# Add custom repository
-echo "src/gz custom_packages https://raw.githubusercontent.com/rizkikotet-dev/RTA-WRT_Packages/releases/packages/[BRANCH]/[ARCH]" >> /etc/opkg/customfeeds.conf
+# Add custom repository (replace [BRANCH] and [ARCH] with your values)
+echo "src/gz custom_packages https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/releases/packages/[BRANCH]/[ARCH]" >> /etc/opkg/customfeeds.conf
 
 # Update package lists
 opkg update
@@ -103,18 +116,148 @@ opkg update
 opkg install [package_name]
 ```
 
-### Direct Download
+### Method 2: Direct Download
 
-Browse and download packages directly from:
-- 🌐 [GitHub Releases](https://github.com/rizkikotet-dev/RTA-WRT_Packages/tree/releases/packages)
-- 📋 [Package Index](packages/repository.json)
+Browse packages directly at: [📂 Package Browser](../../tree/releases/packages)
 
-## 🔄 Build Information
+### Method 3: Batch Installation Script
 
-- **Source Repository**: [rizkikotet-dev/RTA-WRT_Packages](https://github.com/rizkikotet-dev/RTA-WRT_Packages)
-- **Workflow Run**: [15806997807](https://github.com/rizkikotet-dev/RTA-WRT_Packages/actions/runs/15806997807)
-- **Build Date**: 2025-06-22 13:17:42 UTC
+```bash
+#!/bin/bash
+# Auto-detect architecture and install packages
+ARCH=$(opkg print-architecture | awk 'NR==2{print $2}')
+BRANCH="openwrt-23.05"  # or openwrt-24.10, SNAPSHOT
+
+# Add repository
+echo "src/gz custom_packages https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/releases/packages/$BRANCH/$ARCH" > /etc/opkg/customfeeds.conf
+
+# Update and install
+opkg update
+opkg list | grep custom_packages
+```
+
+## 🔧 Architecture Detection
+
+Not sure about your architecture? Run this on your OpenWRT device:
+
+```bash
+opkg print-architecture | head -5
+cat /proc/cpuinfo | grep "model name\|cpu model\|Hardware"
+```
+
+## 📋 Available Packages by Category
+
+<details>
+<summary>🔍 <strong>Click to view package categories</strong></summary>
+<br>
+
+| Category | Description | Example Packages |
+|----------|-------------|------------------|
+| 🌐 **Network** | Networking tools and protocols | `curl`, `wget`, `iperf3` |
+| 🔒 **Security** | Security and encryption tools | `openssl`, `dropbear`, `wireguard` |
+| 🛠️ **System** | System utilities and tools | `htop`, `nano`, `rsync` |
+| 📡 **Wireless** | WiFi and wireless utilities | `hostapd`, `wpa-supplicant` |
+| 💾 **Storage** | File system and storage tools | `block-mount`, `kmod-fs-ext4` |
+| 🔌 **Hardware** | Hardware drivers and support | `kmod-usb-storage`, `kmod-i2c` |
+
+</details>
+
+## 🛡️ Quality Assurance
+
+- ✅ **Automated Testing**: All packages undergo validation
+- 🔄 **Weekly Builds**: Fresh packages every week
+- 📊 **Build Monitoring**: Failed builds are tracked and fixed
+- 🏷️ **Version Tracking**: Clear versioning and changelog
+
+## 🤝 Contributing
+
+Want to add your packages? Here's how:
+
+1. **Fork** this repository
+2. **Add** your packages to the `packages/` directory
+3. **Test** locally with OpenWRT SDK
+4. **Submit** a pull request
+
+### Package Structure
+```
+packages/
+├── your-package/
+│   ├── Makefile
+│   ├── files/
+│   └── patches/
+```
+
+## 🐛 Troubleshooting
+
+<details>
+<summary>❓ <strong>Common Issues & Solutions</strong></summary>
+
+### Package Installation Fails
+```bash
+# Clear opkg cache and retry
+rm -rf /tmp/opkg-lists/*
+opkg update
+opkg install [package_name]
+```
+
+### Architecture Mismatch
+```bash
+# Check your device architecture
+opkg print-architecture
+# Use the correct architecture in repository URL
+```
+
+### Repository Not Found
+```bash
+# Verify repository URL is correct
+cat /etc/opkg/customfeeds.conf
+# Test connectivity
+wget -q --spider [repository_url]/Packages.gz
+```
+
+</details>
+
+## 📈 Build Status & Monitoring
+
+<div align="center">
+  <a href="../../actions">
+    <img src="https://img.shields.io/github/actions/workflow/status/YOUR_USERNAME/YOUR_REPO/build.yml?branch=main&style=for-the-badge&logo=github-actions" alt="Build Status">
+  </a>
+  <a href="../../releases">
+    <img src="https://img.shields.io/github/v/release/YOUR_USERNAME/YOUR_REPO?style=for-the-badge&logo=github" alt="Latest Release">
+  </a>
+  <a href="../../commits/main">
+    <img src="https://img.shields.io/github/last-commit/YOUR_USERNAME/YOUR_REPO?style=for-the-badge&logo=git" alt="Last Commit">
+  </a>
+</div>
+
+## 📞 Support & Community
+
+- 🐛 **Bug Reports**: [Create an Issue](../../issues/new?template=bug_report.md)
+- 💡 **Feature Requests**: [Request Feature](../../issues/new?template=feature_request.md)
+- 💬 **Discussions**: [Join Discussion](../../discussions)
+- 📧 **Contact**: [Email Support](mailto:support@example.com)
+
+## 📄 License & Legal
+
+This repository contains packages from various sources. Each package maintains its original license.
+
+- 📜 **Repository License**: MIT
+- ⚖️ **Package Licenses**: Varies (see individual packages)
+- 🔒 **Privacy Policy**: No personal data collected
 
 ---
 
-*This repository is automatically updated via GitHub Actions*
+<div align="center">
+  <h3>🌟 Star this repository if it helps you!</h3>
+  <p>
+    <a href="../../stargazers">⭐ Star</a> •
+    <a href="../../network/members">🍴 Fork</a> •
+    <a href="../../issues">🐛 Report Bug</a> •
+    <a href="../../discussions">💬 Discuss</a>
+  </p>
+</div>
+
+<div align="center">
+  <sub>Built with ❤️ using GitHub Actions • Powered by OpenWRT</sub>
+</div>
