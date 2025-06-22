@@ -25,7 +25,7 @@ jobs:
       - name: Download artifacts from specific run
         uses: actions/download-artifact@v4
         with:
-          run-id: 15803121933
+          artifact-ids: 15803121933
           path: artifacts
 
       - name: Process artifacts
