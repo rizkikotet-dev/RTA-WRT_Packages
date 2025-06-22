@@ -140,7 +140,6 @@ jobs:
     needs: prepare
     if: needs.prepare.outputs.should_build == 'true'
     continue-on-error: ${{ !matrix.stable }}
-    timeout-minutes: 120
     
     strategy:
       fail-fast: false
@@ -316,7 +315,6 @@ jobs:
     needs: [prepare, build]
     runs-on: ubuntu-latest
     if: always() && needs.prepare.outputs.should_build == 'true'
-    timeout-minutes: 60
 
     steps:
       - name: 🎯 Release initialization
