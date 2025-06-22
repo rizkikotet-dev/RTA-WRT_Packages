@@ -78,6 +78,7 @@ jobs:
       - name: 🏗️ Generate build matrix
         id: matrix
         run: |
+          set -euo pipefail
           set -x
           custom_arch="${{ github.event.inputs.custom_arch }}"
           custom_branch="${{ github.event.inputs.custom_branch }}"
@@ -90,10 +91,7 @@ jobs:
             "aarch64_cortex-a72" 
             "aarch64_cortex-a76"
             "aarch64_generic"
-            "arm_cortex-a7"
-            "arm_cortex-a9"
             "x86_64"
-            "i386_pentium4"
           )
           
           # Define branches based on build target
@@ -129,11 +127,12 @@ jobs:
               fi
               matrix_json+="{\"arch\":\"$arch\",\"branch\":\"$branch\",\"stable\":$([ "$branch" != "SNAPSHOT" ] && echo "true" || echo "false")}"
               ((total_jobs++))
+              echo "total_jobs after increment: $total_jobs"
             done
           done
           
           matrix_json+=']}'
-          
+          echo "Writing outputs"
           echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
           echo "total_jobs=$total_jobs" >> $GITHUB_OUTPUT
           
