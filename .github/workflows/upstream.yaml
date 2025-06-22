@@ -23,6 +23,7 @@ on:
           - standard
           - deep-clean
           - quick-check
+          - merge-only
       
       notification_level:
         description: '📢 Notification level'
@@ -38,7 +39,9 @@ env:
   # 🌟 Configuration
   KWRT_REPO_URL: https://github.com/kiddin9/kwrt-packages
   PACKAGES_DIR: packages
-  WORKFLOW_VERSION: "2.0.0"
+  WORKFLOW_VERSION: "2.1.0"
+  MANUAL_PACKAGES_FILE: ".manual-packages"
+  SYNC_METADATA_FILE: ".sync-metadata.json"
   
   # 🎨 Styling
   EMOJI_SUCCESS: "✨"
@@ -106,6 +109,10 @@ jobs:
             echo "SYNC_MODE=⚡ Quick Check" >> $GITHUB_ENV
             echo "CLEAN_STRATEGY=minimal" >> $GITHUB_ENV
             ;;
+          "merge-only")
+            echo "SYNC_MODE=🔄 Merge Only" >> $GITHUB_ENV
+            echo "CLEAN_STRATEGY=merge" >> $GITHUB_ENV
+            ;;
           *)
             echo "SYNC_MODE=🔄 Standard" >> $GITHUB_ENV
             echo "CLEAN_STRATEGY=standard" >> $GITHUB_ENV
@@ -119,13 +126,51 @@ jobs:
         echo "  🔄 Mode: $SYNC_MODE"
         echo "  📦 Version: ${{ env.WORKFLOW_VERSION }}"
 
-    - name: 🏗️ Prepare Workspace
+    - name: 🏗️ Prepare Workspace & Inventory
       run: |
-        echo "🏗️ Preparing synchronized workspace..."
+        echo "🏗️ Preparing synchronized workspace with inventory protection..."
         
         # Create directory structure
         mkdir -p ${{ env.PACKAGES_DIR }}
         mkdir -p .sync-metadata
+        
+        # Create or load manual packages registry
+        if [ ! -f "${{ env.MANUAL_PACKAGES_FILE }}" ]; then
+          echo "📝 Creating manual packages registry..."
+          echo "# Manual/Contributed Packages Registry" > "${{ env.MANUAL_PACKAGES_FILE }}"
+          echo "# Add package names (one per line) that should NOT be removed during sync" >> "${{ env.MANUAL_PACKAGES_FILE }}"
+          echo "# Format: package-name or directory-name" >> "${{ env.MANUAL_PACKAGES_FILE }}"
+          echo "" >> "${{ env.MANUAL_PACKAGES_FILE }}"
+        fi
+        
+        # Load sync metadata if exists
+        if [ -f "${{ env.SYNC_METADATA_FILE }}" ]; then
+          echo "📋 Loading existing sync metadata..."
+          cp "${{ env.SYNC_METADATA_FILE }}" .sync-metadata/previous-sync.json
+        else
+          echo "📋 Creating initial sync metadata..."
+        fi
+        
+        # Inventory current packages
+        echo "📦 Creating current package inventory..."
+        find ${{ env.PACKAGES_DIR }} -maxdepth 1 -not -name '.*' -not -name ${{ env.PACKAGES_DIR }} \
+          -printf "%f\n" 2>/dev/null | sort > .sync-metadata/current-packages.txt || echo > .sync-metadata/current-packages.txt
+        
+        # Load manual packages list (excluding comments and empty lines)
+        grep -v '^#\|^$' "${{ env.MANUAL_PACKAGES_FILE }}" 2>/dev/null | sort > .sync-metadata/manual-packages.txt || echo > .sync-metadata/manual-packages.txt
+        
+        # Show inventory summary
+        CURRENT_COUNT=$(wc -l < .sync-metadata/current-packages.txt)
+        MANUAL_COUNT=$(wc -l < .sync-metadata/manual-packages.txt)
+        
+        echo "📊 Package Inventory:"
+        echo "  📦 Current packages: $CURRENT_COUNT"
+        echo "  🔒 Protected packages: $MANUAL_COUNT"
+        
+        if [ $MANUAL_COUNT -gt 0 ]; then
+          echo "🔒 Protected packages list:"
+          sed 's/^/    - /' .sync-metadata/manual-packages.txt
+        fi
         
         # Preserve important files
         if [ -f ${{ env.PACKAGES_DIR }}/.gitkeep ]; then
@@ -142,7 +187,9 @@ jobs:
           "workflow_version": "${{ env.WORKFLOW_VERSION }}",
           "sync_mode": "${{ env.SYNC_MODE }}",
           "triggered_by": "${{ github.event_name }}",
-          "actor": "${{ github.actor }}"
+          "actor": "${{ github.actor }}",
+          "protected_packages_count": $MANUAL_COUNT,
+          "current_packages_count": $CURRENT_COUNT
         }
         EOF
         
@@ -181,9 +228,9 @@ jobs:
         ls -lah kwrt-packages.zip
         echo "🔐 File integrity: $(sha256sum kwrt-packages.zip | cut -d' ' -f1)"
 
-    - name: 🎁 Extract and Process
+    - name: 🎁 Extract and Smart Merge
       run: |
-        echo "🎁 Processing downloaded archive..."
+        echo "🎁 Processing downloaded archive with smart merge..."
         
         # Extract with verification
         if ! unzip -q kwrt-packages.zip; then
@@ -191,24 +238,133 @@ jobs:
           exit 1
         fi
         
-        echo "🧹 Applying ${{ env.CLEAN_STRATEGY }} cleaning strategy..."
+        # Create staging area
+        mkdir -p .sync-staging
         
-        # Advanced cleaning based on strategy
+        echo "📦 Analyzing source packages..."
+        cd kwrt-packages-main
+        
+        # Count and categorize source files
+        TOTAL_FILES=$(find . -maxdepth 1 -type f -not -name 'README*' -not -name '.*' | wc -l)
+        TOTAL_DIRS=$(find . -maxdepth 1 -type d -not -name '.' -not -name '.github' -not -name '.git' | wc -l)
+        
+        echo "📊 Source statistics:"
+        echo "  📄 Files: $TOTAL_FILES"
+        echo "  📁 Directories: $TOTAL_DIRS"
+        
+        # Move source files to staging
+        find . -maxdepth 1 -type f \
+          -not -name 'README*' \
+          -not -name 'LICENSE*' \
+          -not -name '.*' \
+          -not -name '*.md' \
+          -exec mv {} ../.sync-staging/ \; 2>/dev/null || true
+        
+        find . -maxdepth 1 -type d \
+          -not -name '.' \
+          -not -name '.github' \
+          -not -name '.git' \
+          -exec mv {} ../.sync-staging/ \; 2>/dev/null || true
+        
+        cd ..
+        
+        # Create source package inventory
+        find .sync-staging -maxdepth 1 -not -name '.*' -not -name .sync-staging \
+          -printf "%f\n" 2>/dev/null | sort > .sync-metadata/source-packages.txt || echo > .sync-metadata/source-packages.txt
+        
+        SOURCE_COUNT=$(wc -l < .sync-metadata/source-packages.txt)
+        echo "📦 Source packages: $SOURCE_COUNT"
+        
+        # Perform smart merge based on strategy
+        echo "🔄 Applying ${{ env.CLEAN_STRATEGY }} merge strategy..."
+        
         case "${{ env.CLEAN_STRATEGY }}" in
           "aggressive")
-            echo "🧹 Performing deep clean..."
-            rm -rf ${{ env.PACKAGES_DIR }}/*
-            rm -rf ${{ env.PACKAGES_DIR }}/.[!.]*
+            echo "🧹 Performing aggressive merge (removes ALL non-protected packages)..."
+            # Remove all packages except protected ones
+            while IFS= read -r package; do
+              if [ -n "$package" ]; then
+                PACKAGE_PATH="${{ env.PACKAGES_DIR }}/$package"
+                if [ -e "$PACKAGE_PATH" ]; then
+                  # Check if package is protected
+                  if ! grep -Fxq "$package" .sync-metadata/manual-packages.txt; then
+                    echo "🗑️ Removing unprotected package: $package"
+                    rm -rf "$PACKAGE_PATH"
+                  else
+                    echo "🔒 Preserving protected package: $package"
+                  fi
+                fi
+              fi
+            done < .sync-metadata/current-packages.txt
             ;;
+            
           "minimal")
-            echo "🧹 Performing minimal clean..."
-            find ${{ env.PACKAGES_DIR }} -type f -name "*.tmp" -delete 2>/dev/null || true
+            echo "🧹 Performing minimal merge (only updates existing)..."
+            # Only update packages that exist in both source and destination
+            comm -12 .sync-metadata/source-packages.txt .sync-metadata/current-packages.txt | \
+            while IFS= read -r package; do
+              if [ -n "$package" ]; then
+                # Check if package is protected before updating
+                if ! grep -Fxq "$package" .sync-metadata/manual-packages.txt; then
+                  echo "🔄 Updating existing package: $package"
+                  rm -rf "${{ env.PACKAGES_DIR }}/$package"
+                else
+                  echo "🔒 Skipping protected package: $package"
+                fi
+              fi
+            done
             ;;
+            
+          "merge")
+            echo "🔄 Performing merge-only (preserves all existing)..."
+            # Don't remove anything, only add new packages
+            echo "ℹ️ All existing packages will be preserved"
+            ;;
+            
           *)
-            echo "🧹 Performing standard clean..."
-            rm -rf ${{ env.PACKAGES_DIR }}/*
+            echo "🔄 Performing standard merge (removes only conflicting non-protected)..."
+            # Remove packages that exist in destination but check protection
+            while IFS= read -r package; do
+              if [ -n "$package" ]; then
+                PACKAGE_PATH="${{ env.PACKAGES_DIR }}/$package"
+                if [ -e "$PACKAGE_PATH" ]; then
+                  # Check if package is protected
+                  if ! grep -Fxq "$package" .sync-metadata/manual-packages.txt; then
+                    # Check if package exists in source (will be replaced)
+                    if grep -Fxq "$package" .sync-metadata/source-packages.txt; then
+                      echo "🔄 Replacing package: $package"
+                      rm -rf "$PACKAGE_PATH"
+                    fi
+                  else
+                    echo "🔒 Preserving protected package: $package"
+                  fi
+                fi
+              fi
+            done < .sync-metadata/current-packages.txt
             ;;
         esac
+        
+        # Move new/updated packages from staging to destination
+        echo "📦 Installing source packages..."
+        INSTALLED_COUNT=0
+        SKIPPED_COUNT=0
+        
+        find .sync-staging -maxdepth 1 -not -name '.*' -not -name .sync-staging | while read -r item; do
+          if [ -n "$item" ]; then
+            PACKAGE_NAME=$(basename "$item")
+            DEST_PATH="${{ env.PACKAGES_DIR }}/$PACKAGE_NAME"
+            
+            # Check if destination exists and is protected
+            if [ -e "$DEST_PATH" ] && grep -Fxq "$PACKAGE_NAME" .sync-metadata/manual-packages.txt; then
+              echo "🔒 Skipping protected package: $PACKAGE_NAME"
+              SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+            else
+              echo "✅ Installing package: $PACKAGE_NAME"
+              mv "$item" "$DEST_PATH"
+              INSTALLED_COUNT=$((INSTALLED_COUNT + 1))
+            fi
+          fi
+        done
         
         # Restore preserved files
         if [ -f .sync-metadata/.gitkeep.backup ]; then
@@ -216,39 +372,24 @@ jobs:
           mv .sync-metadata/.gitkeep.backup ${{ env.PACKAGES_DIR }}/.gitkeep
         fi
         
-        # Process files with enhanced filtering
-        echo "📦 Processing package files..."
-        cd kwrt-packages-main
-        
-        # Count and categorize files
-        TOTAL_FILES=$(find . -maxdepth 1 -type f -not -name 'README*' -not -name '.*' | wc -l)
-        TOTAL_DIRS=$(find . -maxdepth 1 -type d -not -name '.' -not -name '.github' -not -name '.git' | wc -l)
-        
-        echo "📊 Processing statistics:"
-        echo "  📄 Files: $TOTAL_FILES"
-        echo "  📁 Directories: $TOTAL_DIRS"
-        
-        # Smart file moving with exclusions
-        find . -maxdepth 1 -type f \
-          -not -name 'README*' \
-          -not -name 'LICENSE*' \
-          -not -name '.*' \
-          -not -name '*.md' \
-          -exec mv {} ../${{ env.PACKAGES_DIR }}/ \; 2>/dev/null || true
-        
-        find . -maxdepth 1 -type d \
-          -not -name '.' \
-          -not -name '.github' \
-          -not -name '.git' \
-          -exec mv {} ../${{ env.PACKAGES_DIR }}/ \; 2>/dev/null || true
-        
-        cd ..
+        # Update sync metadata
+        cat > "${{ env.SYNC_METADATA_FILE }}" << EOF
+        {
+          "last_sync_id": "${{ env.SYNC_ID }}",
+          "last_sync_timestamp": "${{ env.SYNC_TIMESTAMP }}",
+          "last_sync_mode": "${{ env.SYNC_MODE }}",
+          "source_packages_count": $SOURCE_COUNT,
+          "workflow_version": "${{ env.WORKFLOW_VERSION }}"
+        }
+        EOF
         
         # Cleanup
         echo "🧹 Cleaning temporary files..."
-        rm -rf kwrt-packages.zip kwrt-packages-main .sync-metadata
+        rm -rf kwrt-packages.zip kwrt-packages-main .sync-staging
         
-        echo "✅ Processing completed successfully!"
+        echo "✅ Smart merge completed successfully!"
+        echo "📊 Final statistics:"
+        echo "  📦 Source packages: $SOURCE_COUNT"
 
     - name: 🔬 Advanced Change Analysis
       id: analyze
@@ -310,6 +451,10 @@ jobs:
           echo "  📄 Untracked: $UNTRACKED"
           echo "  📈 Total: $TOTAL_CHANGES"
           
+          # Show protected packages info
+          PROTECTED_COUNT=$(wc -l < .sync-metadata/manual-packages.txt 2>/dev/null || echo 0)
+          echo "  🔒 Protected: $PROTECTED_COUNT packages"
+          
         else
           echo "has_changes=false" >> $GITHUB_OUTPUT
           echo "total_changes=0" >> $GITHUB_OUTPUT
@@ -329,6 +474,7 @@ jobs:
         # Generate smart commit message
         MAGNITUDE="${{ steps.analyze.outputs.change_magnitude || 'forced' }}"
         TOTAL_CHANGES="${{ steps.analyze.outputs.total_changes || '0' }}"
+        PROTECTED_COUNT=$(wc -l < .sync-metadata/manual-packages.txt 2>/dev/null || echo 0)
         
         case "$MAGNITUDE" in
           "major")
@@ -361,6 +507,7 @@ jobs:
         ├─ 🆔 ID: ${{ env.SYNC_ID }}
         ├─ 🔄 Mode: ${{ env.SYNC_MODE }}
         ├─ 📦 Version: ${{ env.WORKFLOW_VERSION }}
+        ├─ 🔒 Protected: $PROTECTED_COUNT packages
         └─ 📡 Source: ${{ env.KWRT_REPO_URL }}
         
         📊 Change Summary:
@@ -370,11 +517,14 @@ jobs:
         ├─ 🔄 Renamed: ${{ steps.analyze.outputs.renamed || 0 }}
         └─ 📄 New: ${{ steps.analyze.outputs.untracked || 0 }}
         
+        🔒 Protected packages preserved during sync
         🤖 Automated by GitHub Actions
         🔗 Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         
-        # Commit and push
+        # Add all changes including metadata files
         git add ${{ env.PACKAGES_DIR }}/
+        git add "${{ env.SYNC_METADATA_FILE }}"
+        git add "${{ env.MANUAL_PACKAGES_FILE }}"
         git commit -m "$COMMIT_MSG"
         git push
         
@@ -383,6 +533,10 @@ jobs:
     - name: 📊 Generate Advanced Report
       run: |
         echo "📊 Generating comprehensive sync report..."
+        
+        # Load statistics
+        PROTECTED_COUNT=$(wc -l < .sync-metadata/manual-packages.txt 2>/dev/null || echo 0)
+        CURRENT_COUNT=$(find ${{ env.PACKAGES_DIR }} -maxdepth 1 -not -name '.*' -not -name ${{ env.PACKAGES_DIR }} | wc -l)
         
         # Determine status
         if [[ "${{ steps.analyze.outputs.has_changes }}" == "true" ]]; then
@@ -418,7 +572,32 @@ jobs:
         | **📡 Source** | [${{ env.KWRT_REPO_URL }}](${{ env.KWRT_REPO_URL }}) |
         | **🔗 Workflow** | [Run #${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
         
+        ### 🔒 Package Protection Status
+        
+        | 📊 Category | 🔢 Count | 📝 Description |
+        |-------------|----------|----------------|
+        | **🔒 Protected Packages** | \`$PROTECTED_COUNT\` | Manual/contributed packages preserved |
+        | **📦 Total Packages** | \`$CURRENT_COUNT\` | All packages in repository |
+        | **⚡ Sync Eligible** | \`$((CURRENT_COUNT - PROTECTED_COUNT))\` | Packages managed by sync |
+        
         EOF
+        
+        # Show protected packages if any
+        if [ $PROTECTED_COUNT -gt 0 ]; then
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+        ### 🔒 Protected Packages List
+        
+        EOF
+          while IFS= read -r package; do
+            if [ -n "$package" ]; then
+              echo "- \`$package\`" >> $GITHUB_STEP_SUMMARY
+            fi
+          done < .sync-metadata/manual-packages.txt
+          
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+        
+        EOF
+        fi
         
         # Add change details if applicable
         if [[ "${{ steps.analyze.outputs.has_changes }}" == "true" ]]; then
@@ -446,14 +625,31 @@ jobs:
         EOF
         fi
         
-        # Add footer
+        # Add instructions for managing protected packages
         cat >> $GITHUB_STEP_SUMMARY << EOF
+        ### 🛠️ Managing Protected Packages
+        
+        To protect packages from being removed during sync:
+        
+        1. **Add to protection list**: Edit \`${{ env.MANUAL_PACKAGES_FILE }}\` file
+        2. **Add package name**: One package name per line (e.g., \`my-custom-package\`)
+        3. **Commit changes**: Protected packages list is version controlled
+        
+        **Example \`${{ env.MANUAL_PACKAGES_FILE }}\`:**
+        \`\`\`
+        # Manual/Contributed Packages Registry
+        my-custom-package
+        contributed-tool
+        local-modification
+        \`\`\`
+        
         ---
         
         ### 🎯 Quick Actions
         
         - 🔄 [View Source Repository](${{ env.KWRT_REPO_URL }})
         - 📦 [Browse Packages](${{ github.server_url }}/${{ github.repository }}/tree/main/${{ env.PACKAGES_DIR }})
+        - 🔒 [Edit Protected Packages](${{ github.server_url }}/${{ github.repository }}/edit/main/${{ env.MANUAL_PACKAGES_FILE }})
         - 📊 [Workflow History](${{ github.server_url }}/${{ github.repository }}/actions/workflows/sync-kwrt.yml)
         - 🚀 [Manual Sync](${{ github.server_url }}/${{ github.repository }}/actions/workflows/sync-kwrt.yml)
         
@@ -463,7 +659,7 @@ jobs:
         
         **🤖 Powered by GitHub Actions** • **⚡ KWRT Sync Bot v${{ env.WORKFLOW_VERSION }}**
         
-        *Automated package synchronization for the modern era*
+        *Intelligent package synchronization with contribution protection*
         
         </div>
         EOF
@@ -482,7 +678,10 @@ jobs:
         echo "│ 📦 Version: ${{ env.WORKFLOW_VERSION }}                            │"
         echo "│ 🎯 Status: $([ "${{ steps.analyze.outputs.has_changes }}" == "true" ] && echo "✅ Updated" || echo "ℹ️ No changes")                                 │"
         echo "│ 📊 Changes: ${{ steps.analyze.outputs.total_changes || 0 }} files affected                          │"
+        echo "│ 🔒 Protected: $(wc -l < .sync-metadata/manual-packages.txt 2>/dev/null || echo 0) packages preserved                       │"
         echo "└─────────────────────────────────────────────────────────────┘"
         echo ""
+        echo "🔒 Manual/contributed packages are preserved during sync"
+        echo "📝 To protect packages: edit ${{ env.MANUAL_PACKAGES_FILE }}"
         echo "🚀 Next sync scheduled for tomorrow at 02:00 UTC"
         echo "⚡ Manual sync available via workflow dispatch"
