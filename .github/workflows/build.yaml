@@ -208,7 +208,7 @@ jobs:
           INDEX: 1
           NO_REFRESH_CHECK: true
           IGNORE_ERRORS: true
-          PACKAGES: ${{ github.event.inputs.package != '' && format('select {0}', github.event.inputs.package) || '' }}
+          PACKAGES: ${{ github.event.inputs.package != '' }}
 
       - name: 🔍 Validate build artifacts
         id: validate
