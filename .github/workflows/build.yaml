@@ -26,6 +26,10 @@ on:
         description: '🌿 Custom branch (if custom selected)'
         required: false
         type: string
+      package:
+        description: '📦 Optional: Name of the single package to build (e.g., my-package)'
+        required: false
+        type: string
 
 env:
   SOURCE_REPO: rizkikotet-dev/RTA-WRT_Packages
@@ -183,6 +187,17 @@ jobs:
           echo "Disk space: $(df -h | head -2)"
           echo "::endgroup::"
 
+      - name: 📦 Validate package existence
+        if: github.event.inputs.package != ''
+        run: |
+          PACKAGE="${{ github.event.inputs.package }}"
+          if [ -d "./packages/$PACKAGE" ] && [ -f "./packages/$PACKAGE/Makefile" ]; then
+            echo "🔍 Package '$PACKAGE' found"
+          else
+            echo "❌ Package '$PACKAGE' not found in packages/ directory"
+            exit 1
+          fi
+
       - name: 🏗️ Build packages with OpenWRT SDK
         uses: openwrt/gh-action-sdk@main
         env:
@@ -193,6 +208,7 @@ jobs:
           INDEX: 1
           NO_REFRESH_CHECK: true
           IGNORE_ERRORS: true
+          PACKAGES: ${{ github.event.inputs.package != '' && format('select {0}', github.event.inputs.package) || '' }}
 
       - name: 🔍 Validate build artifacts
         id: validate
