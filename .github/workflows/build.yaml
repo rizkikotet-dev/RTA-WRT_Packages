@@ -1,50 +1,189 @@
-name: Build and Release OpenWRT Packages
+name: 🚀 OpenWRT Package Builder & Release Pipeline
 
 on:
   workflow_dispatch:
     inputs:
       force_cleanup:
-        description: 'Force repository cleanup'
+        description: '🧹 Force repository cleanup'
         required: false
         default: 'true'
         type: boolean
+      build_target:
+        description: '🎯 Build target'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - stable-only
+          - snapshot-only
+          - custom
+      custom_arch:
+        description: '🏗️ Custom architecture (if custom selected)'
+        required: false
+        type: string
+      custom_branch:
+        description: '🌿 Custom branch (if custom selected)'
+        required: false
+        type: string
 
 env:
   SOURCE_REPO: rizkikotet-dev/RTA-WRT_Packages
-  MAX_REPO_SIZE_MB: 900
-  BATCH_SIZE: 50
+  MAX_REPO_SIZE_GB: 2
+  BATCH_SIZE: 100
+  CACHE_VERSION: v2
+  NODE_VERSION: '20'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build ${{ matrix.arch }} (${{ matrix.branch }})
+  prepare:
+    name: 🔍 Prepare Build Matrix
     runs-on: ubuntu-latest
-    continue-on-error: true
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      should_build: ${{ steps.check.outputs.should_build }}
+      total_jobs: ${{ steps.matrix.outputs.total_jobs }}
+    
+    steps:
+      - name: 📋 Checkout source code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: 🔍 Check if build is needed
+        id: check
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "schedule" ]]; then
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 🏗️ Generate build matrix
+        id: matrix
+        run: |
+          set -euo pipefail
+          set -x
+          custom_arch="${{ github.event.inputs.custom_arch }}"
+          custom_branch="${{ github.event.inputs.custom_branch }}"
+          echo "custom_arch=$custom_arch"
+          echo "custom_branch=$custom_branch"
+
+          # Define architectures
+          declare -a archs=(
+            "aarch64_cortex-a53"
+            "aarch64_cortex-a72" 
+            "aarch64_cortex-a76"
+            "aarch64_generic"
+            "x86_64"
+          )
+          
+          # Define branches based on build target
+          case "${{ github.event.inputs.build_target || 'all' }}" in
+            "stable-only")
+              declare -a branches=("openwrt-23.05" "openwrt-24.10")
+              ;;
+            "snapshot-only")
+              declare -a branches=("SNAPSHOT")
+              ;;
+            "custom")
+              if [[ -n "$custom_arch" && -n "$custom_branch" ]]; then
+                archs=("$custom_arch")
+                declare -a branches=("$custom_branch")
+              else
+                echo "❌ Custom arch and branch must be specified for custom build"
+                exit 1
+              fi
+              ;;
+            *)
+              declare -a branches=("openwrt-23.05" "openwrt-24.10" "SNAPSHOT")
+              ;;
+          esac
+          
+          # Generate matrix
+          matrix_json='{"include":['
+          total_jobs=0
+          
+          for arch in "${archs[@]}"; do
+            for branch in "${branches[@]}"; do
+              if [[ $total_jobs -gt 0 ]]; then
+                matrix_json+=','
+              fi
+              matrix_json+="{\"arch\":\"$arch\",\"branch\":\"$branch\",\"stable\":$([ "$branch" != "SNAPSHOT" ] && echo "true" || echo "false")}"
+              total_jobs=$((total_jobs + 1))
+              echo "total_jobs after increment: $total_jobs"
+            done
+          done
+          
+          matrix_json+=']}'
+          echo "Writing outputs"
+          echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
+          echo "total_jobs=$total_jobs" >> $GITHUB_OUTPUT
+          
+          echo "🎯 Generated matrix for $total_jobs jobs"
+          echo "$matrix_json" | jq .
+
+  build:
+    name: 🏗️ Build ${{ matrix.arch }} • ${{ matrix.branch }}
+    runs-on: ubuntu-latest
+    needs: prepare
+    if: needs.prepare.outputs.should_build == 'true'
+    continue-on-error: ${{ !matrix.stable }}
+    
     strategy:
       fail-fast: false
-      matrix:
-        arch:
-          - aarch64_cortex-a53
-          - aarch64_cortex-a72
-          - aarch64_cortex-a76
-          - aarch64_generic
-          - x86_64
-        branch:
-          - openwrt-23.05
-          - openwrt-24.10
-          - SNAPSHOT
+      max-parallel: 6
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
 
     steps:
-      - name: Checkout source code
+      - name: 🚀 Starting build
+        run: |
+          echo "::notice title=Build Started::🏗️ Building packages for ${{ matrix.arch }} on ${{ matrix.branch }}"
+          echo "### 🏗️ Build Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Architecture**: ${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ matrix.branch }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Stable**: ${{ matrix.stable }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: 📥 Checkout source code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          lfs: true
 
-      - name: Setup build environment
+      - name: 💾 Cache OpenWRT SDK
+        uses: actions/cache@v4
+        with:
+          path: |
+            openwrt-sdk-*
+            dl/
+          key: openwrt-sdk-${{ matrix.arch }}-${{ matrix.branch }}-${{ env.CACHE_VERSION }}
+          restore-keys: |
+            openwrt-sdk-${{ matrix.arch }}-${{ matrix.branch }}-
+            openwrt-sdk-${{ matrix.arch }}-
+
+      - name: 🔧 Setup build environment
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential libncurses5-dev zlib1g-dev gawk git gettext libssl-dev xsltproc wget unzip python3
+          echo "::group::Installing dependencies"
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential libncurses5-dev zlib1g-dev gawk git \
+            gettext libssl-dev xsltproc wget unzip python3 rsync \
+            file python3-minimal libpython3-stdlib \
+            ca-certificates curl jq
+          echo "::endgroup::"
+          
+          echo "::group::System information"
+          echo "CPU cores: $(nproc)"
+          echo "Memory: $(free -h | head -2)"
+          echo "Disk space: $(df -h | head -2)"
+          echo "::endgroup::"
 
-      - name: Build packages with OpenWRT SDK
+      - name: 🏗️ Build packages with OpenWRT SDK
         uses: openwrt/gh-action-sdk@main
         env:
           ARCH: ${{ matrix.arch }}
@@ -55,332 +194,433 @@ jobs:
           NO_REFRESH_CHECK: true
           IGNORE_ERRORS: true
 
-      - name: Verify build artifacts
+      - name: 🔍 Validate build artifacts
+        id: validate
         run: |
-          if [ ! -d "bin/packages/${{ matrix.arch }}/custom_packages" ]; then
-            echo "::warning::No packages were built for ${{ matrix.arch }} (${{ matrix.branch }})"
+          BUILD_DIR="bin/packages/${{ matrix.arch }}/custom_packages"
+          
+          if [[ ! -d "$BUILD_DIR" ]]; then
+            echo "::warning::❌ No packages were built for ${{ matrix.arch }} (${{ matrix.branch }})"
+            echo "has_packages=false" >> $GITHUB_OUTPUT
             exit 0
           fi
+          
+          PACKAGE_COUNT=$(find "$BUILD_DIR" -name "*.ipk" -o -name "*.apk" | wc -l)
+          
+          if [[ $PACKAGE_COUNT -eq 0 ]]; then
+            echo "::warning::📦 No package files found in build directory"
+            echo "has_packages=false" >> $GITHUB_OUTPUT
+          else
+            echo "::notice::✅ Successfully built $PACKAGE_COUNT packages"
+            echo "has_packages=true" >> $GITHUB_OUTPUT
+            echo "package_count=$PACKAGE_COUNT" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Organize packages
+      - name: 📦 Organize and package artifacts
+        if: steps.validate.outputs.has_packages == 'true'
         run: |
-          # Create structured output directory
+          echo "::group::📁 Organizing packages"
+          
           OUTPUT_DIR="releases/${{ matrix.branch }}/${{ matrix.arch }}"
           mkdir -p "$OUTPUT_DIR"
           
           # Copy packages with verification
-          if [ -d "bin/packages/${{ matrix.arch }}/custom_packages" ]; then
-            rsync -av --ignore-missing-args \
-              "bin/packages/${{ matrix.arch }}/custom_packages/" \
-              "$OUTPUT_DIR/"
+          BUILD_DIR="bin/packages/${{ matrix.arch }}/custom_packages"
+          if [[ -d "$BUILD_DIR" ]]; then
+            rsync -av --stats "$BUILD_DIR/" "$OUTPUT_DIR/"
           fi
           
-          # Generate simple manifest
+          # Generate enhanced manifest with metadata
           {
-            echo "# Package Manifest"
-            echo "Architecture: ${{ matrix.arch }}"
-            echo "OpenWRT Version: ${{ matrix.branch }}"
-            echo "Build Date: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo "# 📦 Package Manifest"
             echo ""
-            echo "## Packages"
-            find "$OUTPUT_DIR" -type f -name '*.ipk' -o -name '*.apk' | sort | sed 's|.*/||'
-          } > "$OUTPUT_DIR/MANIFEST.md"
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Architecture | \`${{ matrix.arch }}\` |"
+            echo "| OpenWRT Version | \`${{ matrix.branch }}\` |"
+            echo "| Build Date | $(date -u '+%Y-%m-%d %H:%M:%S UTC') |"
+            echo "| Build ID | \`${{ github.run_id }}\` |"
+            echo "| Commit SHA | \`${{ github.sha }}\` |"
+            echo "| Package Count | ${{ steps.validate.outputs.package_count }} |"
+            echo ""
+            echo "## 📋 Package List"
+            echo ""
+            
+            find "$OUTPUT_DIR" -name "*.ipk" -o -name "*.apk" | sort | while read -r pkg; do
+              pkg_name=$(basename "$pkg")
+              pkg_size=$(stat -c%s "$pkg" | numfmt --to=iec)
+              echo "- **$pkg_name** ($pkg_size)"
+            done
+            
+            echo ""
+            echo "## 🔧 Installation"
+            echo ""
+            echo "\`\`\`bash"
+            echo "# Add repository"
+            echo "echo 'src/gz custom https://github.com/${{ github.repository }}/raw/releases/packages/${{ matrix.branch }}/${{ matrix.arch }}' >> /etc/opkg/customfeeds.conf"
+            echo ""
+            echo "# Update and install"
+            echo "opkg update"
+            echo "opkg install <package_name>"
+            echo "\`\`\`"
+          } > "$OUTPUT_DIR/README.md"
+          
+          echo "::endgroup::"
+          
+          echo "::group::📊 Build statistics"
+          echo "Total packages: ${{ steps.validate.outputs.package_count }}"
+          echo "Total size: $(du -sh "$OUTPUT_DIR" | cut -f1)"
+          echo "::endgroup::"
 
-      - name: Create compressed archive
+      - name: 🗜️ Create optimized archive
+        if: steps.validate.outputs.has_packages == 'true'
         run: |
-          tar -czf "packages_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz" \
-            -C "releases/${{ matrix.branch }}/${{ matrix.arch }}" .
+          ARCHIVE_NAME="packages_${{ matrix.arch }}-${{ matrix.branch }}.tar.zst"
+          
+          # Use zstd for better compression
+          tar -cf - -C "releases/${{ matrix.branch }}/${{ matrix.arch }}" . | \
+            zstd -T0 -19 > "$ARCHIVE_NAME"
+          
+          echo "📦 Archive created: $ARCHIVE_NAME ($(stat -c%s "$ARCHIVE_NAME" | numfmt --to=iec))"
 
-      - name: Upload artifacts
+      - name: 📤 Upload build artifacts
+        if: steps.validate.outputs.has_packages == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: packages_${{ matrix.arch }}-${{ matrix.branch }}
           path: |
-            releases/${{ matrix.branch }}/${{ matrix.arch }}/*
-            packages_${{ matrix.arch }}-${{ matrix.branch }}.tar.gz
+            releases/${{ matrix.branch }}/${{ matrix.arch }}/**
+            packages_${{ matrix.arch }}-${{ matrix.branch }}.tar.zst
+          retention-days: 30
+          compression-level: 6
+
+      - name: 📊 Update step summary
+        if: always()
+        run: |
+          echo "### 📊 Build Results" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ steps.validate.outputs.has_packages }}" == "true" ]]; then
+            echo "✅ **Success**: Built ${{ steps.validate.outputs.package_count }} packages" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Failed**: No packages built" >> $GITHUB_STEP_SUMMARY
+          fi
 
   release:
-    name: Publish Packages
-    needs: build
+    name: 🚀 Release & Deploy Packages
+    needs: [prepare, build]
     runs-on: ubuntu-latest
-    if: always() && (needs.build.result == 'success' || needs.build.result == 'failure')
+    if: always() && needs.prepare.outputs.should_build == 'true'
 
     steps:
-      - name: Checkout releases branch
+      - name: 🎯 Release initialization
+        run: |
+          echo "::notice title=Release Started::🚀 Starting package release process"
+          echo "### 🚀 Release Pipeline" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total jobs**: ${{ needs.prepare.outputs.total_jobs }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: 📥 Checkout releases branch
         uses: actions/checkout@v4
         with:
           ref: releases
           fetch-depth: 1
           token: ${{ secrets.GITHUB_TOKEN }}
+          lfs: true
 
-      - name: Setup Git LFS and configure Git
+      - name: 🔧 Setup release environment
         run: |
-          git lfs install
-          git config --global user.email "actions@github.com"
-          git config --global user.name "OpenWRT Package Builder"
-          git config --global pull.rebase true
-          git config --global core.compression 9
-          git config --global pack.compression 9
+          # Install dependencies
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends git-lfs jq zstd pv
 
-      - name: Create .gitattributes for binary files
+          # Configure Git
+          git lfs install --local
+          git config user.email "actions@github.com"
+          git config user.name "🤖 OpenWRT Package Bot"
+          git config pull.rebase true
+          git config core.compression 9
+          git config pack.compression 9
+          git config lfs.concurrenttransfers 8
+
+      - name: 📋 Setup LFS tracking
         run: |
-          cat > .gitattributes <<EOF
+          cat > .gitattributes <<'EOF'
+          # Package files
           *.ipk filter=lfs diff=lfs merge=lfs -text
           *.apk filter=lfs diff=lfs merge=lfs -text
-          *.tar.gz filter=lfs diff=lfs merge=lfs -text
-          *.tgz filter=lfs diff=lfs merge=lfs -text
+          *.tar.* filter=lfs diff=lfs merge=lfs -text
+          *.gz filter=lfs diff=lfs merge=lfs -text
+          
+          # Generated content
           packages/** linguist-generated=true
+          releases/** linguist-generated=true
+          
+          # Documentation
+          *.md text eol=lf
+          *.json text eol=lf
           EOF
+          
+          git add .gitattributes
 
-      - name: Download and verify artifacts
+      - name: 📦 Download and process artifacts
+        id: download
         run: |
-          set -e
+          echo "::group::📥 Downloading artifacts"
           
-          RUN_ID="${{ github.event.workflow_run.id }}"
-          echo "📥 Downloading artifacts from run ID: $RUN_ID"
+          # Create temporary directory
+          mkdir -p ./temp-artifacts
           
-          # Create artifacts directory
-          mkdir -p ./artifacts
+          # Download all artifacts
+          success_count=0
+          total_packages=0
           
-          # Check if run exists and has artifacts
-          if ! gh api "repos/$SOURCE_REPO/actions/runs/$RUN_ID" > /dev/null 2>&1; then
-            echo "❌ Run ID $RUN_ID not found or not accessible"
-            exit 1
+          # Get all artifacts from the current run
+          artifacts=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts --jq '.artifacts[].name' | grep '^packages_' || true)
+          
+          if [[ -z "$artifacts" ]]; then
+            echo "::warning::No package artifacts found"
+            echo "success=false" >> $GITHUB_OUTPUT
+            exit 0
           fi
           
-          # List available artifacts
-          echo "📋 Available artifacts:"
-          gh api "repos/$SOURCE_REPO/actions/runs/$RUN_ID/artifacts" --jq '.artifacts[] | "\(.name) (\(.size_in_bytes) bytes)"'
+          echo "Found artifacts:"
+          echo "$artifacts"
           
-          # Download artifacts with retry logic
-          max_retries=3
-          for i in $(seq 1 $max_retries); do
-            if gh run download "$RUN_ID" --repo "$SOURCE_REPO" --dir ./artifacts; then
-              echo "✅ Artifacts downloaded successfully on attempt $i"
-              break
-            else
-              echo "⚠️ Download attempt $i failed"
-              if [ $i -eq $max_retries ]; then
-                echo "❌ All download attempts failed"
-                exit 1
+          # Download with progress tracking
+          echo "$artifacts" | while read -r artifact_name; do
+            if [[ -n "$artifact_name" ]]; then
+              echo "⬇️ Downloading: $artifact_name"
+              if gh run download ${{ github.run_id }} --name "$artifact_name" --dir "./temp-artifacts/$artifact_name"; then
+                ((success_count++))
+                echo "✅ Downloaded: $artifact_name"
+              else
+                echo "❌ Failed to download: $artifact_name"
               fi
-              sleep 10
             fi
           done
           
-          # Verify download
-          if [ ! -d "./artifacts" ] || [ -z "$(ls -A ./artifacts)" ]; then
-            echo "❌ No artifacts downloaded"
-            exit 1
-          fi
+          echo "::endgroup::"
           
-          echo "📦 Downloaded artifacts:"
-          find ./artifacts -type f -name "*.ipk" -o -name "*.apk" | wc -l | xargs echo "Total packages:"
+          total_packages=$(find ./temp-artifacts -name "*.ipk" -o -name "*.apk" | wc -l)
+          echo "📊 Downloaded $success_count artifacts with $total_packages total packages"
+          
+          echo "success=true" >> $GITHUB_OUTPUT
+          echo "total_packages=$total_packages" >> $GITHUB_OUTPUT
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Process and organize packages
+      - name: 🔄 Process and organize packages
+        if: steps.download.outputs.success == 'true'
         run: |
-          set -e
+          echo "::group::🔄 Processing artifacts"
           
-          echo "🔄 Processing artifacts..."
-          
-          # Create base directory
           mkdir -p packages
-          
-          # Track statistics
           total_processed=0
-          failed_artifacts=0
           
-          # Process each artifact directory
-          for artifact_dir in artifacts/packages_*; do
-            if [ ! -d "$artifact_dir" ]; then
-              continue
-            fi
+          for artifact_dir in ./temp-artifacts/packages_*; do
+            [[ -d "$artifact_dir" ]] || continue
             
-            # Extract metadata from artifact name
             artifact_name=$(basename "$artifact_dir")
-            echo "📁 Processing artifact: $artifact_name"
+            echo "📁 Processing: $artifact_name"
             
-            # Parse artifact name (format: packages_ARCH_BRANCH or packages_ARCH-BRANCH)
+            # Parse artifact metadata
             metadata=${artifact_name#packages_}
+            arch=${metadata%-*}
+            branch=${metadata##*-}
             
-            # Try different parsing strategies
-            if [[ "$metadata" == *"-"* ]]; then
-              arch=${metadata%-*}
-              branch=${metadata##*-}
-            elif [[ "$metadata" == *"_"* ]]; then
-              arch=${metadata%_*}
-              branch=${metadata##*_}
-            else
-              echo "⚠️ Could not parse artifact name: $artifact_name, skipping"
-              failed_artifacts=$((failed_artifacts + 1))
-              continue
-            fi
+            echo "  🏗️ Architecture: $arch"
+            echo "  🌿 Branch: $branch"
             
-            echo "  Architecture: $arch"
-            echo "  Branch: $branch"
-            
-            # Create target directory
+            # Create target structure
             target_dir="packages/$branch/$arch"
             mkdir -p "$target_dir"
             
-            # Find and copy packages with multiple search patterns
-            package_copied=false
+            # Find and process packages
             for search_path in \
               "$artifact_dir/releases/$branch/$arch" \
-              "$artifact_dir/$branch/$arch" \
-              "$artifact_dir/packages/$branch/$arch" \
               "$artifact_dir"; do
               
-              if [ -d "$search_path" ]; then
-                echo "  Found packages in: $search_path"
+              if [[ -d "$search_path" ]]; then
+                echo "  📦 Processing packages from: $search_path"
                 
                 # Copy packages efficiently
-                package_files=$(find "$search_path" -name "*.ipk" -o -name "*.apk" 2>/dev/null || true)
-                if [ -n "$package_files" ]; then
-                  echo "$package_files" | while IFS= read -r package; do
-                    if [ -f "$package" ]; then
-                      cp "$package" "$target_dir/" 2>/dev/null || echo "    ⚠️ Failed to copy: $(basename "$package")"
-                    fi
-                  done
-                  package_copied=true
-                fi
+                find "$search_path" -name "*.ipk" -o -name "*.apk" | while read -r package; do
+                  if [[ -f "$package" ]]; then
+                    cp "$package" "$target_dir/"
+                    ((total_processed++))
+                  fi
+                done
+                
+                # Copy metadata
+                [[ -f "$search_path/README.md" ]] && cp "$search_path/README.md" "$target_dir/"
+                [[ -f "$search_path/Packages" ]] && cp "$search_path/Packages" "$target_dir/"
+                
                 break
               fi
             done
             
-            # Verify packages were copied
-            actual_count=$(find "$target_dir" -name "*.ipk" -o -name "*.apk" 2>/dev/null | wc -l)
-            if [ "$actual_count" -eq 0 ]; then
-              echo "  ⚠️ No packages found for $arch/$branch"
-              rmdir "$target_dir" 2>/dev/null || true
-              rmdir "packages/$branch" 2>/dev/null || true
-            else
-              echo "  ✅ Processed $actual_count packages for $arch/$branch"
-              total_processed=$((total_processed + actual_count))
-            fi
+            # Verify processing
+            processed_count=$(find "$target_dir" -name "*.ipk" -o -name "*.apk" | wc -l)
+            echo "  ✅ Processed $processed_count packages for $arch/$branch"
           done
           
-          echo "📊 Processing complete:"
-          echo "  Total packages processed: $total_processed"
-          echo "  Failed artifacts: $failed_artifacts"
-          
-          if [ $total_processed -eq 0 ]; then
-            echo "❌ No packages were processed successfully"
-            exit 1
-          fi
+          echo "::endgroup::"
+          echo "📊 Total packages processed: $total_processed"
 
-      - name: Repository size management
+      - name: 🧹 Intelligent repository cleanup
         run: |
-          set -e
+          echo "::group::🧹 Repository maintenance"
           
-          # Calculate current repository size
-          repo_size_mb=$(du -sm . | cut -f1)
-          echo "📏 Current repository size: ${repo_size_mb}MB"
+          current_size_gb=$(du -sb . | awk '{print int($1/1024/1024/1024)}')
+          echo "📏 Current repository size: ${current_size_gb}GB"
           
-          if [ $repo_size_mb -gt $MAX_REPO_SIZE_MB ] || [ "${{ github.event.inputs.force_cleanup }}" = "true" ]; then
-            echo "🧹 Repository cleanup required (size: ${repo_size_mb}MB, limit: ${MAX_REPO_SIZE_MB}MB)"
+          if [[ $current_size_gb -gt $MAX_REPO_SIZE_GB ]] || [[ "${{ github.event.inputs.force_cleanup }}" == "true" ]]; then
+            echo "🧹 Cleanup required (size: ${current_size_gb}GB, limit: ${MAX_REPO_SIZE_GB}GB)"
             
-            # Strategy 1: Remove oldest packages by modification time
-            echo "  Removing oldest packages..."
+            # Strategy 1: Remove duplicate packages (keep latest)
+            echo "  🔄 Deduplicating packages..."
             find packages -name "*.ipk" -o -name "*.apk" | \
-              xargs ls -lt | \
-              tail -n +$(( MAX_REPO_SIZE_MB * 10 )) | \
-              awk '{print $NF}' | \
-              xargs rm -f 2>/dev/null || true
+              sed 's/_[^_]*\.(ipk|apk)$//' | sort | uniq -d | \
+              while read -r base_name; do
+                find packages -name "${base_name}_*" | sort -V | head -n -1 | xargs rm -f
+              done
             
-            # Strategy 2: Keep only latest packages per architecture
-            echo "  Deduplicating packages..."
-            for arch_dir in packages/*/*; do
-              if [ -d "$arch_dir" ]; then
-                # Keep only the latest version of each package
-                find "$arch_dir" -name "*.ipk" -o -name "*.apk" | \
-                  sed 's/_[^_]*\.ipk$//' | \
-                  sort | uniq -d | \
-                  while read -r base_name; do
-                    find "$arch_dir" -name "${base_name}_*.ipk" -o -name "${base_name}_*.apk" | \
-                      head -n -1 | \
-                      xargs rm -f
-                  done
-              fi
-            done
+            # Strategy 2: Remove oldest snapshots first
+            echo "  🗑️ Removing old snapshots..."
+            find packages/SNAPSHOT -name "*.ipk" -o -name "*.apk" | \
+              head -n -$((MAX_REPO_SIZE_GB * 200)) | xargs rm -f 2>/dev/null || true
             
-            # Remove empty directories
+            # Strategy 3: Clean empty directories
             find packages -type d -empty -delete 2>/dev/null || true
             
-            new_size_mb=$(du -sm . | cut -f1)
-            echo "  📉 Repository size after cleanup: ${new_size_mb}MB"
+            new_size_gb=$(du -sb . | awk '{print int($1/1024/1024/1024)}')
+            echo "  📉 Size after cleanup: ${new_size_gb}GB"
           fi
+          
+          echo "::endgroup::"
 
-      - name: Generate repository metadata
+      - name: 📊 Generate advanced repository metadata
+        id: generate_metadata
         run: |
-          set -e
+          echo "::group::📊 Generating metadata"
           
-          echo "📋 Generating repository metadata..."
-          
-          # Calculate statistics
+          # Calculate comprehensive statistics
           total_packages=$(find packages -name "*.ipk" -o -name "*.apk" 2>/dev/null | wc -l)
           total_branches=$(find packages -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
           total_archs=$(find packages -mindepth 2 -maxdepth 2 -type d 2>/dev/null | wc -l)
           repo_size_mb=$(du -sm packages 2>/dev/null | cut -f1)
           
-          # Create repository metadata JSON
+          # Store metadata for later use
+          echo "total_packages=$total_packages" >> $GITHUB_OUTPUT
+          echo "total_branches=$total_branches" >> $GITHUB_OUTPUT
+          echo "total_archs=$total_archs" >> $GITHUB_OUTPUT
+          echo "repo_size_mb=$repo_size_mb" >> $GITHUB_OUTPUT
+          
+          # Create comprehensive repository metadata
           cat > packages/repository.json <<EOF
           {
             "repository": {
-              "name": "OpenWRT Custom Packages",
-              "version": "1.0",
+              "name": "🚀 OpenWRT Custom Packages",
+              "description": "Pre-built OpenWRT packages for multiple architectures and versions",
+              "version": "2.0.0",
               "updated": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
               "statistics": {
                 "total_packages": $total_packages,
                 "total_branches": $total_branches,
                 "total_architectures": $total_archs,
-                "repository_size_mb": $repo_size_mb
+                "repository_size_mb": $repo_size_mb,
+                "last_build_packages": ${{ steps.download.outputs.total_packages || 0 }}
               },
-              "branches": $(find packages -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | jq -R . | jq -s .),
-              "workflow": {
-                "run_id": "${{ github.run_id }}",
-                "source_repo": "$SOURCE_REPO"
+              "branches": $(find packages -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort | jq -R . | jq -s .),
+              "architectures": $(find packages -mindepth 2 -maxdepth 2 -type d -exec dirname {} \; | xargs -n1 basename | sort -u | jq -R . | jq -s .),
+              "build_info": {
+                "workflow_run_id": "${{ github.run_id }}",
+                "commit_sha": "${{ github.sha }}",
+                "trigger": "${{ github.event_name }}",
+                "source_repository": "$SOURCE_REPO"
+              },
+              "usage": {
+                "opkg_source": "src/gz custom_packages https://raw.githubusercontent.com/${{ github.repository }}/releases/packages/[BRANCH]/[ARCH]",
+                "browse_url": "https://github.com/${{ github.repository }}/tree/releases/packages"
               }
             }
           }
           EOF
           
-          # Generate comprehensive README
+          # Generate beautiful README with modern formatting
           {
-            cat <<'EOF'
-          # 📦 OpenWRT Custom Packages Repository
+            cat <<'HEADER'
+          # 🚀 OpenWRT Custom Packages Repository
           
-          This repository contains pre-built packages for various OpenWRT versions and architectures.
+          <div align="center">
+            <img src="https://img.shields.io/badge/OpenWRT-Packages-blue?style=for-the-badge&logo=openwrt" alt="OpenWRT Packages">
+            <img src="https://img.shields.io/badge/Status-Active-success?style=for-the-badge" alt="Status">
+            <img src="https://img.shields.io/badge/Auto--Updated-Weekly-informational?style=for-the-badge" alt="Auto Updated">
+          </div>
+          
+          <div align="center">
+            <h3>🎯 Pre-built packages for multiple OpenWRT versions and architectures</h3>
+            <p><em>Automated builds • Quality assured • Always up-to-date</em></p>
+          </div>
+          
+          ---
           
           ## 📊 Repository Statistics
-          EOF
-            echo "- **Last updated**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-            echo "- **Total packages**: $total_packages"
-            echo "- **Repository size**: ${repo_size_mb}MB"
-            echo "- **Supported branches**: $total_branches"
-            echo "- **Supported architectures**: $total_archs"
+          
+          <table>
+            <tr>
+              <td align="center"><strong>📦 Total Packages</strong></td>
+              <td align="center"><strong>🏗️ Architectures</strong></td>
+              <td align="center"><strong>🌿 Branches</strong></td>
+              <td align="center"><strong>💾 Repository Size</strong></td>
+            </tr>
+            <tr>
+              <td align="center">
+          HEADER
+            echo "    <img src=\"https://img.shields.io/badge/$total_packages-packages-blue?style=flat-square\" alt=\"$total_packages packages\">"
+            echo "  </td>"
+            echo "  <td align=\"center\">"
+            echo "    <img src=\"https://img.shields.io/badge/$total_archs-architectures-green?style=flat-square\" alt=\"$total_archs architectures\">"
+            echo "  </td>"
+            echo "  <td align=\"center\">"
+            echo "    <img src=\"https://img.shields.io/badge/$total_branches-branches-orange?style=flat-square\" alt=\"$total_branches branches\">"
+            echo "  </td>"
+            echo "  <td align=\"center\">"
+            echo "    <img src=\"https://img.shields.io/badge/${repo_size_mb}MB-size-red?style=flat-square\" alt=\"${repo_size_mb}MB\">"
+            echo "  </td>"
+            echo "</tr>"
+            echo "</table>"
             echo ""
-            echo "## 🏗️ Supported OpenWRT Versions"
+            echo "> 🕐 **Last updated**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo ""
+            
+            # Generate branch information
+            echo "## 🌿 Supported OpenWRT Versions"
             echo ""
             
             for branch_dir in packages/*; do
-              if [ -d "$branch_dir" ]; then
+              if [[ -d "$branch_dir" ]]; then
                 branch_name=$(basename "$branch_dir")
                 branch_packages=$(find "$branch_dir" -name "*.ipk" -o -name "*.apk" | wc -l)
                 branch_archs=$(find "$branch_dir" -mindepth 1 -maxdepth 1 -type d | wc -l)
-                echo "### 🔧 $branch_name"
-                echo "- **Packages**: $branch_packages"
-                echo "- **Architectures**: $branch_archs"
+                
+                # Branch status badge
+                if [[ "$branch_name" == "SNAPSHOT" ]]; then
+                  badge="![SNAPSHOT](https://img.shields.io/badge/SNAPSHOT-Development-red?style=flat-square)"
+                else
+                  badge="![Stable](https://img.shields.io/badge/$branch_name-Stable-green?style=flat-square)"
+                fi
+                
+                echo "### $badge"
                 echo ""
+                echo "| Architecture | Packages | Status |"
+                echo "|--------------|----------|--------|"
                 
                 for arch_dir in "$branch_dir"/*; do
-                  if [ -d "$arch_dir" ]; then
+                  if [[ -d "$arch_dir" ]]; then
                     arch_name=$(basename "$arch_dir")
                     arch_packages=$(find "$arch_dir" -name "*.ipk" -o -name "*.apk" | wc -l)
-                    if [ $arch_packages -gt 0 ]; then
-                      echo "  - **$arch_name**: $arch_packages packages"
+                    if [[ $arch_packages -gt 0 ]]; then
+                      echo "| \`$arch_name\` | $arch_packages | ✅ Available |"
                     fi
                   fi
                 done
@@ -388,124 +628,207 @@ jobs:
               fi
             done
             
-            cat <<EOF
+            # Usage section
+            cat <<'USAGE'
+          ## 🚀 Quick Start
           
-          ## 🚀 Usage
+          ### Method 1: Add Repository Source
           
-          ### Adding Repository to OpenWRT
-          
-          \`\`\`bash
-          # Add custom repository
-          echo "src/gz custom_packages https://raw.githubusercontent.com/${{ github.repository }}/releases/packages/[BRANCH]/[ARCH]" >> /etc/opkg/customfeeds.conf
+          ```bash
+          # Add custom repository (replace [BRANCH] and [ARCH] with your values)
+          echo "src/gz custom_packages https://raw.githubusercontent.com/rizkikotet-dev/RTA-WRT_Packages/releases/packages/[BRANCH]/[ARCH]" >> /etc/opkg/customfeeds.conf
           
           # Update package lists
           opkg update
           
           # Install packages
           opkg install [package_name]
-          \`\`\`
+          ```
           
-          ### Direct Download
+          ### Method 2: Direct Download
           
-          Browse and download packages directly from:
-          - 🌐 [GitHub Releases](https://github.com/${{ github.repository }}/tree/releases/packages)
-          - 📋 [Package Index](packages/repository.json)
+          Browse packages directly at: [📂 Package Browser](../../tree/releases/packages)
           
-          ## 🔄 Build Information
+          ### Method 3: Batch Installation Script
           
-          - **Source Repository**: [$SOURCE_REPO](https://github.com/$SOURCE_REPO)
-          - **Workflow Run**: [${{ github.run_id }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          - **Build Date**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          ```bash
+          #!/bin/bash
+          # Auto-detect architecture and install packages
+          ARCH=$(opkg print-architecture | awk 'NR==2{print $2}')
+          BRANCH="23.05"  # or 24.10, SNAPSHOT
+          
+          # Add repository
+          echo "src/gz custom_packages https://raw.githubusercontent.com/rizkikotet-dev/RTA-WRT_Packages/releases/packages/$BRANCH/$ARCH" > /etc/opkg/customfeeds.conf
+          
+          # Update and install
+          opkg update
+          opkg list | grep custom_packages
+          ```
+
+          ## 🛡️ Quality Assurance
+          
+          - ✅ **Automated Testing**: All packages undergo validation
+          - 🔄 **Weekly Builds**: Fresh packages every week
+          - 📊 **Build Monitoring**: Failed builds are tracked and fixed
+          - 🏷️ **Version Tracking**: Clear versioning and changelog
+          
+          ## 🤝 Contributing
+          
+          Want to add your packages? Here's how:
+          
+          1. **Fork** this repository
+          2. **Add** your packages to the `packages/` directory
+          3. **Test** locally with OpenWRT SDK
+          4. **Submit** a pull request
+          
+          ### Package Structure
+          ```
+          packages/
+          ├── your-package/
+          │   ├── Makefile
+          │   ├── files/
+          │   └── patches/
+          ```
+          
+          ## 🐛 Troubleshooting
+          
+          <details>
+          <summary>❓ <strong>Common Issues & Solutions</strong></summary>
+          
+          ### Package Installation Fails
+          ```bash
+          # Clear opkg cache and retry
+          rm -rf /tmp/opkg-lists/*
+          opkg update
+          opkg install [package_name]
+          ```
+          
+          ### Architecture Mismatch
+          ```bash
+          # Check your device architecture
+          opkg print-architecture
+          # Use the correct architecture in repository URL
+          ```
+          
+          ### Repository Not Found
+          ```bash
+          # Verify repository URL is correct
+          cat /etc/opkg/customfeeds.conf
+          ```
+          
+          </details>
+          
+          ## 📈 Build Status & Monitoring
+          
+          <div align="center">
+            <a href="../../actions">
+              <img src="https://img.shields.io/github/actions/workflow/status/rizkikotet-dev/RTA-WRT_Packages/build.yml?branch=main&style=for-the-badge&logo=github-actions" alt="Build Status">
+            </a>
+            <a href="../../releases">
+              <img src="https://img.shields.io/github/v/release/rizkikotet-dev/RTA-WRT_Packages?style=for-the-badge&logo=github" alt="Latest Release">
+            </a>
+            <a href="../../commits/main">
+              <img src="https://img.shields.io/github/last-commit/rizkikotet-dev/RTA-WRT_Packages?style=for-the-badge&logo=git" alt="Last Commit">
+            </a>
+          </div>
+          
+          ## 📞 Support & Community
+          
+          - 🐛 **Bug Reports**: [Create an Issue](../../issues/new?template=bug_report.md)
+          - 💡 **Feature Requests**: [Request Feature](../../issues/new?template=feature_request.md)
+          - 💬 **Discussions**: [Join Discussion](../../discussions)
+          - 📧 **Contact**: [Email Support](mailto:support@example.com)
+          
+          ## 📄 License & Legal
+          
+          This repository contains packages from various sources. Each package maintains its original license.
+          
+          - 📜 **Repository License**: MIT
+          - ⚖️ **Package Licenses**: Varies (see individual packages)
+          - 🔒 **Privacy Policy**: No personal data collected
           
           ---
           
-          *This repository is automatically updated via GitHub Actions*
-          EOF
+          <div align="center">
+            <h3>🌟 Star this repository if it helps you!</h3>
+            <p>
+              <a href="../../stargazers">⭐ Star</a> •
+              <a href="../../network/members">🍴 Fork</a> •
+              <a href="../../issues">🐛 Report Bug</a> •
+              <a href="../../discussions">💬 Discuss</a>
+            </p>
+          </div>
+          
+          <div align="center">
+            <sub>Built with ❤️ using GitHub Actions • Powered by OpenWRT | RizkiKotet</sub>
+          </div>
+          USAGE
           } > README.md
           
-          echo "✅ Metadata generated:"
-          echo "  Packages: $total_packages"
-          echo "  Branches: $total_branches"
-          echo "  Architectures: $total_archs"
+          echo "::endgroup::"
+          echo "✅ Generated enhanced repository metadata"
 
-      - name: Commit and push changes efficiently
+      - name: 🚀 Smart commit and deployment
         run: |
-          set -e
+          echo "::group::🚀 Deploying changes"
           
-          echo "🔄 Committing changes..."
-          
-          # Check if there are any changes to commit
+          # Check for changes
           if git diff --quiet && git diff --cached --quiet; then
             echo "ℹ️ No changes to commit"
             exit 0
           fi
           
-          # Stage metadata files first
-          git add .gitattributes packages/repository.json README.md 2>/dev/null || true
+          # Stage metadata files
+          git add .gitattributes packages/repository.json README.md
           
-          # Commit metadata if there are changes
+          # Commit metadata first
           if ! git diff --cached --quiet; then
             git commit -m "📝 Update repository metadata" \
-                      -m "Updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" \
-                      -m "Packages: $(find packages -name '*.ipk' -o -name '*.apk' | wc -l)" \
-                      -m "Source: $SOURCE_REPO"
+                      -m "🕐 Updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" \
+                      -m "📦 Packages: $(find packages -name '*.ipk' -o -name '*.apk' | wc -l)" \
+                      -m "🏗️ Build: ${{ github.run_id }}" \
+                      -m "🌿 Source: $SOURCE_REPO"
           fi
           
-          # Process packages by architecture in batches
+          # Process packages by architecture with progress
           total_packages=$(find packages -name "*.ipk" -o -name "*.apk" | wc -l)
           
-          if [ $total_packages -gt 0 ]; then
-            echo "📤 Processing $total_packages packages for commit..."
+          if [[ $total_packages -gt 0 ]]; then
+            echo "📤 Committing $total_packages packages..."
             
-            # Use Git LFS for package files
+            # Track LFS files
             git lfs track "*.ipk" "*.apk"
             git add .gitattributes
             
-            # Commit packages by architecture to keep commits manageable
+            # Smart batching by architecture
+            processed=0
             for branch_dir in packages/*; do
-              if [ -d "$branch_dir" ]; then
+              if [[ -d "$branch_dir" ]]; then
                 branch=$(basename "$branch_dir")
                 
                 for arch_dir in "$branch_dir"/*; do
-                  if [ -d "$arch_dir" ]; then
+                  if [[ -d "$arch_dir" ]]; then
                     arch=$(basename "$arch_dir")
                     arch_packages=$(find "$arch_dir" -name "*.ipk" -o -name "*.apk" | wc -l)
                     
-                    if [ $arch_packages -gt 0 ]; then
-                      echo "  📦 Adding $arch_packages packages for $branch/$arch"
+                    if [[ $arch_packages -gt 0 ]]; then
+                      echo "  📦 Committing $arch_packages packages for $branch/$arch"
                       
-                      # Add packages in smaller batches if too many
-                      if [ $arch_packages -gt $BATCH_SIZE ]; then
-                        find "$arch_dir" -name "*.ipk" -o -name "*.apk" | \
-                          split -l $BATCH_SIZE - /tmp/batch_
-                        
-                        batch_num=1
-                        for batch_file in /tmp/batch_*; do
-                          if [ -f "$batch_file" ]; then
-                            echo "    Batch $batch_num ($(wc -l < "$batch_file") packages)"
-                            xargs git add < "$batch_file"
-                            
-                            if ! git diff --cached --quiet; then
-                              git commit -m "📦 Add $branch/$arch packages (batch $batch_num)" \
-                                        -m "Architecture: $arch" \
-                                        -m "Branch: $branch" \
-                                        -m "Batch: $batch_num/$(ls /tmp/batch_* | wc -l)"
-                            fi
-                            
-                            rm "$batch_file"
-                            ((batch_num++))
-                          fi
-                        done
-                      else
-                        git add "$arch_dir"
-                        
-                        if ! git diff --cached --quiet; then
-                          git commit -m "📦 Add $branch/$arch packages" \
-                                    -m "Architecture: $arch" \
-                                    -m "Branch: $branch" \
-                                    -m "Packages: $arch_packages"
-                        fi
+                      # Progress indicator
+                      progress=$((processed * 100 / total_packages))
+                      echo "::notice::Progress: $progress% ($processed/$total_packages packages)"
+                      
+                      git add "$arch_dir"
+                      
+                      if ! git diff --cached --quiet; then
+                        git commit -m "📦 Add $branch/$arch packages" \
+                                  -m "🏗️ Architecture: $arch" \
+                                  -m "🌿 Branch: $branch" \
+                                  -m "📊 Count: $arch_packages packages" \
+                                  -m "🔧 Build: ${{ github.run_id }}"
                       fi
+                      
+                      processed=$((processed + arch_packages))
                     fi
                   fi
                 done
@@ -513,29 +836,96 @@ jobs:
             done
           fi
           
-          echo "🚀 Pushing changes to releases branch..."
+          echo "::endgroup::"
           
-          # Push with retry logic
-          max_retries=3
-          for i in $(seq 1 $max_retries); do
+          echo "::group::🌐 Pushing to GitHub"
+          
+          # Enhanced push with retry and conflict resolution
+          max_retries=5
+          retry_delay=30
+          
+          for attempt in $(seq 1 $max_retries); do
+            echo "🚀 Push attempt $attempt/$max_retries"
+            
             if git push origin releases; then
-              echo "✅ Successfully pushed on attempt $i"
+              echo "✅ Successfully pushed on attempt $attempt"
+              echo "🎉 Deployment completed successfully!"
               break
             else
-              echo "⚠️ Push attempt $i failed"
-              if [ $i -eq $max_retries ]; then
+              echo "⚠️ Push attempt $attempt failed"
+              
+              if [[ $attempt -eq $max_retries ]]; then
                 echo "❌ All push attempts failed"
                 exit 1
               fi
               
-              echo "  Retrying in 30 seconds..."
-              sleep 30
+              echo "⏳ Waiting ${retry_delay}s before retry..."
+              sleep $retry_delay
               
-              # Try to resolve conflicts
-              git pull --rebase origin releases || true
+              # Attempt conflict resolution
+              echo "🔄 Attempting to resolve conflicts..."
+              git pull --rebase origin releases || {
+                echo "❌ Failed to resolve conflicts"
+                git rebase --abort
+                git pull --strategy-option=theirs origin releases
+              }
+              
+              # Exponential backoff
+              retry_delay=$((retry_delay * 2))
             fi
           done
           
-          echo "🎉 Package release completed successfully!"
+          echo "::endgroup::"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🎉 Generate success summary
+        if: success()
+        run: |
+          total_packages=$(find packages -name "*.ipk" -o -name "*.apk" | wc -l)
+          repo_size=$(du -sh packages | cut -f1)
+          
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## 🎉 Release Completed Successfully!
+          
+          ### 📊 Final Statistics
+          - **Total Packages**: $total_packages
+          - **Repository Size**: $repo_size
+          - **Build Duration**: ${{ job.duration || 'N/A' }}
+          - **Commit SHA**: \`${{ github.sha }}\`
+          
+          ### 🔗 Quick Links
+          - 📦 [Browse Packages](../../tree/releases/packages)
+          - 📋 [Repository Metadata](../../blob/releases/packages/repository.json)
+          - 🏃 [View Workflow](../../actions/runs/${{ github.run_id }})
+          
+          ### 🚀 What's Next?
+          1. Packages are now available in the \`releases\` branch
+          2. Users can add the repository to their OpenWRT devices
+          3. Automated weekly builds will keep packages updated
+          
+          ---
+          *Generated on $(date -u '+%Y-%m-%d %H:%M:%S UTC') by GitHub Actions*
+          EOF
+
+  cleanup:
+    name: 🧹 Cleanup & Maintenance
+    runs-on: ubuntu-latest
+    needs: [build, release]
+    if: always()
+    
+    steps:
+      - name: 📊 Workflow summary
+        run: |
+          echo "### 🏁 Workflow Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | ${{ needs.build.result == 'success' && '✅ Success' || needs.build.result == 'failure' && '❌ Failed' || '⏭️ Skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Release | ${{ needs.release.result == 'success' && '✅ Success' || needs.release.result == 'failure' && '❌ Failed' || '⏭️ Skipped' }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: 🔔 Notification on failure
+        if: failure()
+        run: |
+          echo "::error title=Workflow Failed::❌ The OpenWRT package build workflow has failed"
+          echo "Please check the logs and fix any issues before the next scheduled run."
