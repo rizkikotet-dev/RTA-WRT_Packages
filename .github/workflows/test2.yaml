@@ -1,0 +1,405 @@
+name: Build OpenWrt Packages
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'packages/**'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'packages/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.openwrt.version }} ${{ matrix.target.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        openwrt:
+          # OpenWrt 24.10 (stable)
+          - version: "24.10.1"
+            branch: "24.10"
+            pkg_ext: "ipk"
+            base_url: "https://downloads.openwrt.org/releases/24.10.1/targets"
+          # OpenWrt 23.05 (stable)
+          - version: "23.05.5"
+            branch: "23.05"
+            pkg_ext: "ipk"
+            base_url: "https://downloads.openwrt.org/releases/23.05.5/targets"
+          # OpenWrt Snapshots (development)
+          - version: "SNAPSHOT"
+            branch: "SNAPSHOT"
+            pkg_ext: "apk"
+            base_url: "https://downloads.openwrt.org/snapshots/targets"
+        target:
+          # x86_64 targets
+          - arch: x86_64
+            target_system: "x86/64"
+            target_name: "x86-64"
+            sdk_suffix: "_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
+          # # ARM64 targets
+          # - arch: aarch64
+          #   target_system: "rockchip/armv8"
+          #   target_name: "rockchip-armv8"
+          #   sdk_suffix: "_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
+          # # ARM Cortex-A9 targets
+          # - arch: arm_cortex-a9
+          #   target_system: "ipq806x/generic"
+          #   target_name: "ipq806x-generic"
+          #   sdk_suffix: "_gcc-13.3.0_musl_eabi.Linux-x86_64.tar.zst"
+          # # MIPS targets
+          # - arch: mips
+          #   target_system: "ath79/generic"
+          #   target_name: "ath79-generic"
+          #   sdk_suffix: "_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
+          # # MIPSEL targets
+          # - arch: mipsel
+          #   target_system: "ramips/mt7621"
+          #   target_name: "ramips-mt7621"
+          #   sdk_suffix: "_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup build environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          ccache \
+          ecj \
+          fastjar \
+          file \
+          g++ \
+          gawk \
+          gettext \
+          git \
+          java-propose-classpath \
+          libelf-dev \
+          libncurses5-dev \
+          libncursesw5-dev \
+          libssl-dev \
+          python3 \
+          unzip \
+          wget \
+          python3-distutils \
+          python3-setuptools \
+          python3-dev \
+          rsync \
+          subversion \
+          swig \
+          time \
+          xsltproc \
+          zlib1g-dev \
+          zstd
+
+    - name: Generate SDK URL
+      run: |
+        if [ "${{ matrix.openwrt.version }}" = "SNAPSHOT" ]; then
+          SDK_URL="${{ matrix.openwrt.base_url }}/${{ matrix.target.target_system }}/openwrt-sdk-${{ matrix.target.target_name }}${{ matrix.target.sdk_suffix }}"
+        else
+          SDK_URL="${{ matrix.openwrt.base_url }}/${{ matrix.target.target_system }}/openwrt-sdk-${{ matrix.openwrt.version }}-${{ matrix.target.target_name }}${{ matrix.target.sdk_suffix }}"
+        fi
+        echo "SDK_URL=$SDK_URL" >> $GITHUB_ENV
+        echo "Generated SDK URL: $SDK_URL"
+
+    - name: Download and extract OpenWrt SDK
+      run: |
+        echo "Downloading SDK for ${{ matrix.openwrt.version }} ${{ matrix.target.arch }}"
+        echo "URL: $SDK_URL"
+        
+        # Download with retry mechanism
+        for i in {1..3}; do
+          if wget -O openwrt-sdk.tar.zst "$SDK_URL"; then
+            break
+          else
+            echo "Download attempt $i failed, retrying..."
+            sleep 10
+          fi
+        done
+        
+        if [ ! -f openwrt-sdk.tar.zst ]; then
+          echo "Failed to download SDK after 3 attempts"
+          exit 1
+        fi
+        
+        tar --zstd -xf openwrt-sdk.tar.zst
+        SDK_DIR=$(find . -maxdepth 1 -type d -name "openwrt-sdk-*" | head -1)
+        echo "SDK_PATH=$(pwd)/$SDK_DIR" >> $GITHUB_ENV
+        echo "SDK found at: $SDK_DIR"
+
+    - name: Prepare SDK feeds
+      run: |
+        cd $SDK_PATH
+        echo "src-link custom $(pwd)/../packages" >> feeds.conf.default
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: Get package list
+      id: packages
+      run: |
+        PACKAGES=""
+        if [ -d "./packages" ]; then
+          for pkg in ./packages/*/; do
+            if [ -f "$pkg/Makefile" ]; then
+              pkg_name=$(basename "$pkg")
+              PACKAGES="$PACKAGES $pkg_name"
+            fi
+          done
+        fi
+        # Remove leading space if any
+        PACKAGES=$(echo "$PACKAGES" | sed 's/^ *//')
+        echo "packages=$PACKAGES" >> $GITHUB_OUTPUT
+        echo "Found packages: $PACKAGES"
+
+    - name: Build packages
+      run: |
+        cd $SDK_PATH
+        
+        # Configure build
+        make defconfig
+        
+        # Build each package
+        FAILED_PACKAGES=""
+        BUILT_PACKAGES=""
+        
+        for pkg in ${{ steps.packages.outputs.packages }}; do
+          echo "Building package: $pkg"
+          if make package/$pkg/compile V=s; then
+            echo "✓ Successfully built: $pkg"
+            BUILT_PACKAGES="$BUILT_PACKAGES $pkg"
+          else
+            echo "✗ Failed to build: $pkg"
+            FAILED_PACKAGES="$FAILED_PACKAGES $pkg"
+          fi
+        done
+        
+        # Remove leading spaces
+        BUILT_PACKAGES=$(echo "$BUILT_PACKAGES" | sed 's/^ *//')
+        FAILED_PACKAGES=$(echo "$FAILED_PACKAGES" | sed 's/^ *//')
+        
+        echo "BUILT_PACKAGES=$BUILT_PACKAGES" >> $GITHUB_ENV
+        echo "FAILED_PACKAGES=$FAILED_PACKAGES" >> $GITHUB_ENV
+        
+        # Create build summary
+        echo "## Build Summary for ${{ matrix.openwrt.version }} ${{ matrix.target.arch }}" >> $GITHUB_STEP_SUMMARY
+        echo "Package format: .${{ matrix.openwrt.pkg_ext }}" >> $GITHUB_STEP_SUMMARY
+        if [ -n "$BUILT_PACKAGES" ]; then
+          echo "### ✅ Successfully built packages:" >> $GITHUB_STEP_SUMMARY
+          for pkg in $BUILT_PACKAGES; do
+            echo "- $pkg" >> $GITHUB_STEP_SUMMARY
+          done
+        fi
+        if [ -n "$FAILED_PACKAGES" ]; then
+          echo "### ❌ Failed to build packages:" >> $GITHUB_STEP_SUMMARY
+          for pkg in $FAILED_PACKAGES; do
+            echo "- $pkg" >> $GITHUB_STEP_SUMMARY
+          done
+        fi
+
+    - name: Collect built packages
+      run: |
+        cd $SDK_PATH
+        mkdir -p ../artifacts/${{ matrix.openwrt.branch }}/${{ matrix.target.arch }}
+        
+        # Find and copy all built package files (IPK or APK)
+        find bin/packages -name "*.${{ matrix.openwrt.pkg_ext }}" -type f | while read pkg_file; do
+          package_name=$(basename "$pkg_file" | sed 's/_.*$//')
+          if echo " $BUILT_PACKAGES " | grep -q " $package_name "; then
+            echo "Collecting: $pkg_file"
+            cp "$pkg_file" "../artifacts/${{ matrix.openwrt.branch }}/${{ matrix.target.arch }}/"
+          fi
+        done
+        
+        # List collected files
+        echo "Collected ${{ matrix.openwrt.pkg_ext }} files for ${{ matrix.openwrt.version }} ${{ matrix.target.arch }}:"
+        ls -la ../artifacts/${{ matrix.openwrt.branch }}/${{ matrix.target.arch }}/ || echo "No files collected"
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: packages-${{ matrix.openwrt.branch }}-${{ matrix.target.arch }}
+        path: artifacts/${{ matrix.openwrt.branch }}/${{ matrix.target.arch }}/*.${{ matrix.openwrt.pkg_ext }}
+        retention-days: 30
+        if-no-files-found: warn
+
+  release:
+    name: Upload to releases branch
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    
+    steps:
+    - name: Checkout releases branch
+      uses: actions/checkout@v4
+      with:
+        ref: releases
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+
+    - name: Setup Git
+      run: |
+        git config --global user.email "action@github.com"
+        git config --global user.name "GitHub Action"
+
+    - name: Create directory structure
+      run: |
+        mkdir -p packages/24.10
+        mkdir -p packages/23.05
+        mkdir -p packages/SNAPSHOT
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: temp-artifacts
+
+    - name: Organize packages by version and architecture
+      run: |
+        for artifact_dir in temp-artifacts/packages-*; do
+          if [ -d "$artifact_dir" ]; then
+            # Extract branch and architecture from artifact name
+            artifact_name=$(basename "$artifact_dir")
+            # Format: packages-{branch}-{arch}
+            branch=$(echo "$artifact_name" | sed 's/packages-//' | sed 's/-[^-]*$//')
+            arch=$(echo "$artifact_name" | sed 's/.*-//')
+            
+            target_dir="packages/$branch/$arch"
+            
+            echo "Processing: $artifact_name -> $target_dir"
+            echo "Branch: $branch, Architecture: $arch"
+            
+            mkdir -p "$target_dir"
+            
+            # Determine package extension based on branch
+            if [ "$branch" = "SNAPSHOT" ]; then
+              pkg_ext="apk"
+            else
+              pkg_ext="ipk"
+            fi
+            
+            # Copy packages
+            if ls "$artifact_dir"/*.$pkg_ext 1> /dev/null 2>&1; then
+              echo "Copying $pkg_ext packages for $branch $arch"
+              cp "$artifact_dir"/*.$pkg_ext "$target_dir/"
+              
+              # Create package index
+              cd "$target_dir"
+              echo "# Packages for $arch architecture" > README.md
+              echo "Built on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> README.md
+              echo "OpenWrt Version: $branch" >> README.md
+              echo "Package Format: .$pkg_ext" >> README.md
+              echo "" >> README.md
+              echo "## Available packages:" >> README.md
+              for pkg in *.$pkg_ext; do
+                if [ -f "$pkg" ]; then
+                  size=$(stat -c%s "$pkg" | numfmt --to=iec)
+                  echo "- \`$pkg\` ($size)" >> README.md
+                fi
+              done
+              
+              # Add installation instructions
+              echo "" >> README.md
+              echo "## Installation" >> README.md
+              if [ "$branch" = "SNAPSHOT" ]; then
+                echo "For OpenWrt SNAPSHOT (APK format):" >> README.md
+                echo "\`\`\`bash" >> README.md
+                echo "echo 'src/gz custom https://raw.githubusercontent.com/${{ github.repository }}/releases/packages/$branch/$arch' >> /etc/apk/repositories.d/custom.list" >> README.md
+                echo "apk update" >> README.md
+                echo "\`\`\`" >> README.md
+              else
+                echo "For OpenWrt $branch (IPK format):" >> README.md
+                echo "\`\`\`bash" >> README.md
+                echo "echo 'src/gz custom https://raw.githubusercontent.com/${{ github.repository }}/releases/packages/$branch/$arch' >> /etc/opkg/customfeeds.conf" >> README.md
+                echo "opkg update" >> README.md
+                echo "\`\`\`" >> README.md
+              fi
+              
+              cd - > /dev/null
+            else
+              echo "No $pkg_ext files found for $branch $arch"
+            fi
+          fi
+        done
+
+    - name: Generate main index
+      run: |
+        cat > packages/README.md << 'EOF'
+        # OpenWrt Package Repository
+        
+        Automatically built packages for multiple OpenWrt versions
+        
+        EOF
+        
+        echo "Last updated: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> packages/README.md
+        echo "" >> packages/README.md
+        
+        # Generate index for each OpenWrt version
+        for version_dir in packages/*/; do
+          if [ -d "$version_dir" ]; then
+            version_name=$(basename "$version_dir")
+            echo "## OpenWrt $version_name" >> packages/README.md
+            
+            # Determine package format
+            if [ "$version_name" = "SNAPSHOT" ]; then
+              pkg_format="APK"
+              pkg_ext="apk"
+            else
+              pkg_format="IPK"
+              pkg_ext="ipk"
+            fi
+            
+            echo "Package format: $pkg_format (.$pkg_ext)" >> packages/README.md
+            echo "" >> packages/README.md
+            echo "### Available architectures:" >> packages/README.md
+            
+            for arch_dir in "$version_dir"*/; do
+              if [ -d "$arch_dir" ]; then
+                arch_name=$(basename "$arch_dir")
+                package_count=$(find "$arch_dir" -name "*.$pkg_ext" 2>/dev/null | wc -l)
+                echo "- [\`$arch_name\`]($version_name/$arch_name/) ($package_count packages)" >> packages/README.md
+              fi
+            done
+            echo "" >> packages/README.md
+          fi
+        done
+        
+        cat >> packages/README.md << 'EOF'
+        ## Installation Instructions
+        
+        ### For stable releases (24.10, 23.05) - IPK format:
+        ```bash
+        echo "src/gz custom https://raw.githubusercontent.com/rizkikotet-dev/RTA-WRT_Packages/releases/packages/[VERSION]/[ARCH]" >> /etc/opkg/customfeeds.conf
+        opkg update
+        opkg install [PACKAGE_NAME]
+        ```
+        
+        ### For SNAPSHOT - APK format:
+        ```bash
+        echo 'src/gz custom https://raw.githubusercontent.com/rizkikotet-dev/RTA-WRT_Packages/releases/packages/SNAPSHOT/[ARCH]' >> /etc/apk/repositories.d/custom.list
+        apk update
+        apk add [PACKAGE_NAME]
+        ```
+        
+        Replace:
+        - `rizkikotet-dev/RTA-WRT_Packages` with your GitHub username and repository name
+        - `[VERSION]` with `24.10`, `23.05`, or `SNAPSHOT`
+        - `[ARCH]` with your device architecture (e.g., `x86_64`, `aarch64`, etc.)
+        - `[PACKAGE_NAME]` with the name of the package you want to install
+        EOF
+
+    - name: Commit and push changes
+      run: |
+        git add packages/
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "Update packages for all OpenWrt versions - $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+          git push origin releases
+          echo "Packages uploaded to releases branch"
+        fi
