@@ -38,7 +38,7 @@
 </tr>
 </table>
 
-> 🕐 **Last updated**: 2025-06-22 18:46:41 UTC
+> 🕐 **Last updated**: 2025-06-23 04:56:04 UTC
 
 ## 🌿 Supported OpenWRT Versions
 
@@ -126,7 +126,7 @@ Browse packages directly at: [📂 Package Browser](../../tree/releases/packages
 #!/bin/bash
 # Auto-detect architecture and install packages
 ARCH=$(opkg print-architecture | awk 'NR==2{print $2}')
-BRANCH="openwrt-23.05"  # or openwrt-24.10, SNAPSHOT
+BRANCH="23.05"  # or 24.10, SNAPSHOT
 
 # Add repository
 echo "src/gz custom_packages https://raw.githubusercontent.com/rizkikotet-dev/RTA-WRT_Packages/releases/packages/$BRANCH/$ARCH" > /etc/opkg/customfeeds.conf
@@ -135,32 +135,6 @@ echo "src/gz custom_packages https://raw.githubusercontent.com/rizkikotet-dev/RT
 opkg update
 opkg list | grep custom_packages
 ```
-
-## 🔧 Architecture Detection
-
-Not sure about your architecture? Run this on your OpenWRT device:
-
-```bash
-opkg print-architecture | head -5
-cat /proc/cpuinfo | grep "model name\|cpu model\|Hardware"
-```
-
-## 📋 Available Packages by Category
-
-<details>
-<summary>🔍 <strong>Click to view package categories</strong></summary>
-<br>
-
-| Category | Description | Example Packages |
-|----------|-------------|------------------|
-| 🌐 **Network** | Networking tools and protocols | `curl`, `wget`, `iperf3` |
-| 🔒 **Security** | Security and encryption tools | `openssl`, `dropbear`, `wireguard` |
-| 🛠️ **System** | System utilities and tools | `htop`, `nano`, `rsync` |
-| 📡 **Wireless** | WiFi and wireless utilities | `hostapd`, `wpa-supplicant` |
-| 💾 **Storage** | File system and storage tools | `block-mount`, `kmod-fs-ext4` |
-| 🔌 **Hardware** | Hardware drivers and support | `kmod-usb-storage`, `kmod-i2c` |
-
-</details>
 
 ## 🛡️ Quality Assurance
 
