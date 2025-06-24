@@ -1,0 +1,7 @@
+*.ipk binary
+*.apk binary
+*.tar.gz binary
+*.tar.xz binary
+Packages text
+README.md text
+*.json text

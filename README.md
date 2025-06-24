@@ -38,7 +38,7 @@
 </tr>
 </table>
 
-> 🕐 **Last updated**: 2025-06-24 14:55:26 UTC
+> 🕐 **Last updated**: 2025-06-24 17:39:11 UTC
 
 ## 🌿 Supported OpenWRT Versions
 
@@ -135,6 +135,7 @@ echo "src/gz custom_packages https://raw.githubusercontent.com/rizkikotet-dev/RT
 opkg update
 opkg list | grep custom_packages
 ```
+
 ## 🛡️ Quality Assurance
 
 - ✅ **Automated Testing**: All packages undergo validation
@@ -230,5 +231,5 @@ This repository contains packages from various sources. Each package maintains i
 </div>
 
 <div align="center">
-  <sub>Built with ❤️ using GitHub Actions • Powered by OpenWRT | RizkiKotet</sub>
+  <sub>Built with ❤️ using GitHub Actions • Powered by OpenWRT</sub>
 </div>
