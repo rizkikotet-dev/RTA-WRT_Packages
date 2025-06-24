@@ -24,82 +24,23 @@
   </tr>
   <tr>
     <td align="center">
-    <img src="https://img.shields.io/badge/4456-packages-blue?style=flat-square" alt="4456 packages">
+    <img src="https://img.shields.io/badge/0-packages-blue?style=flat-square" alt="0 packages">
   </td>
   <td align="center">
-    <img src="https://img.shields.io/badge/44-architectures-green?style=flat-square" alt="44 architectures">
+    <img src="https://img.shields.io/badge/0-architectures-green?style=flat-square" alt="0 architectures">
   </td>
   <td align="center">
-    <img src="https://img.shields.io/badge/3-branches-orange?style=flat-square" alt="3 branches">
+    <img src="https://img.shields.io/badge/0-branches-orange?style=flat-square" alt="0 branches">
   </td>
   <td align="center">
-    <img src="https://img.shields.io/badge/18MB-size-red?style=flat-square" alt="18MB">
+    <img src="https://img.shields.io/badge/1MB-size-red?style=flat-square" alt="1MB">
   </td>
 </tr>
 </table>
 
-> 🕐 **Last updated**: 2025-06-24 17:39:11 UTC
+> 🕐 **Last updated**: 2025-06-24 17:44:19 UTC
 
 ## 🌿 Supported OpenWRT Versions
-
-### ![Stable](https://img.shields.io/badge/23.05-Stable-green?style=flat-square)
-
-| Architecture | Packages | Status |
-|--------------|----------|--------|
-| `aarch64_cortex-a53-openwrt` | 104 | ✅ Available |
-| `aarch64_cortex-a72-openwrt` | 104 | ✅ Available |
-| `aarch64_generic-openwrt` | 104 | ✅ Available |
-| `arm_cortex-a15_neon-vfpv4-openwrt` | 104 | ✅ Available |
-| `arm_cortex-a5_vfpv4-openwrt` | 104 | ✅ Available |
-| `arm_cortex-a7_neon-vfpv4-openwrt` | 104 | ✅ Available |
-| `arm_cortex-a8_vfpv3-openwrt` | 104 | ✅ Available |
-| `arm_cortex-a9-openwrt` | 104 | ✅ Available |
-| `arm_cortex-a9_neon-openwrt` | 104 | ✅ Available |
-| `arm_cortex-a9_vfpv3-d16-openwrt` | 104 | ✅ Available |
-| `i386_pentium4-openwrt` | 102 | ✅ Available |
-| `mips64_octeonplus-openwrt` | 102 | ✅ Available |
-| `mips_24kc-openwrt` | 102 | ✅ Available |
-| `mips_4kec-openwrt` | 69 | ✅ Available |
-| `mips_mips32-openwrt` | 102 | ✅ Available |
-| `mipsel_24kc_24kf-openwrt` | 102 | ✅ Available |
-| `mipsel_74kc-openwrt` | 102 | ✅ Available |
-| `mipsel_mips32-openwrt` | 102 | ✅ Available |
-| `x86_64-openwrt` | 102 | ✅ Available |
-
-### ![Stable](https://img.shields.io/badge/24.10-Stable-green?style=flat-square)
-
-| Architecture | Packages | Status |
-|--------------|----------|--------|
-| `aarch64_cortex-a53-openwrt` | 104 | ✅ Available |
-| `aarch64_cortex-a72-openwrt` | 104 | ✅ Available |
-| `aarch64_cortex-a76-openwrt` | 104 | ✅ Available |
-| `aarch64_generic-openwrt` | 104 | ✅ Available |
-| `arm_cortex-a15_neon-vfpv4-openwrt` | 104 | ✅ Available |
-| `arm_cortex-a5_vfpv4-openwrt` | 104 | ✅ Available |
-| `arm_cortex-a7_neon-vfpv4-openwrt` | 104 | ✅ Available |
-| `arm_cortex-a8_vfpv3-openwrt` | 104 | ✅ Available |
-| `arm_cortex-a9-openwrt` | 104 | ✅ Available |
-| `arm_cortex-a9_neon-openwrt` | 104 | ✅ Available |
-| `arm_cortex-a9_vfpv3-d16-openwrt` | 104 | ✅ Available |
-| `i386_pentium4-openwrt` | 102 | ✅ Available |
-| `mips64_octeonplus-openwrt` | 102 | ✅ Available |
-| `mips_24kc-openwrt` | 102 | ✅ Available |
-| `mips_4kec-openwrt` | 69 | ✅ Available |
-| `mips_mips32-openwrt` | 102 | ✅ Available |
-| `mipsel_24kc-openwrt` | 102 | ✅ Available |
-| `mipsel_24kc_24kf-openwrt` | 102 | ✅ Available |
-| `mipsel_74kc-openwrt` | 102 | ✅ Available |
-| `mipsel_mips32-openwrt` | 102 | ✅ Available |
-| `x86_64-openwrt` | 102 | ✅ Available |
-
-### ![SNAPSHOT](https://img.shields.io/badge/SNAPSHOT-Development-red?style=flat-square)
-
-| Architecture | Packages | Status |
-|--------------|----------|--------|
-| `aarch64_cortex-a76` | 104 | ✅ Available |
-| `arm_cortex-a9_vfpv3-d16` | 92 | ✅ Available |
-| `mips_mips32` | 102 | ✅ Available |
-| `mipsel_24kc` | 102 | ✅ Available |
 
 ## 🚀 Quick Start
 
