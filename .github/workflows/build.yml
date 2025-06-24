@@ -372,52 +372,68 @@ jobs:
           git config user.name "🤖 OpenWRT Package Bot"
           git config pull.rebase true
 
-      - name: 📦 Download and process artifacts
-        id: download
+      - name: 📥 Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./temp-artifacts
+
+      - name: 🔄 Process and organize packages
+        if: always()
         run: |
-          echo "::group::📥 Downloading artifacts"
+          echo "::group::🔄 Processing artifacts"
           
-          # Create temporary directory
-          mkdir -p ./temp-artifacts
+          mkdir -p packages
+          total_processed=0
           
-          # Download all artifacts
-          success_count=0
-          total_packages=0
-          
-          # Use actions/download-artifact for better reliability
-          echo "Looking for available artifacts..."
-          
-          # Get list of successful builds
-          build_jobs='${{ toJson(needs.build) }}'
-          echo "Build jobs status: $build_jobs"
-          
-          # Download artifacts from successful builds only
-          download_success=false
-          for artifact_pattern in packages_*; do
-            if gh run download ${{ github.run_id }} --pattern "$artifact_pattern" --dir "./temp-artifacts/" 2>/dev/null; then
-              download_success=true
-              echo "✅ Downloaded: $artifact_pattern"
-              ((success_count++))
-            else
-              echo "ℹ️ No artifact matching: $artifact_pattern"
-            fi
+          for artifact_dir in ./temp-artifacts/packages_*; do
+            [[ -d "$artifact_dir" ]] || continue
+            
+            artifact_name=$(basename "$artifact_dir")
+            echo "📁 Processing: $artifact_name"
+            
+            # Parse artifact metadata
+            metadata=${artifact_name#packages_}
+            arch=${metadata%-*}
+            branch=${metadata##*-}
+            
+            echo "  🏗️ Architecture: $arch"
+            echo "  🌿 Branch: $branch"
+            
+            # Create target structure
+            target_dir="packages/$branch/$arch"
+            mkdir -p "$target_dir"
+            
+            # Find and process packages
+            for search_path in \
+              "$artifact_dir/releases/$branch/$arch" \
+              "$artifact_dir"; do
+              
+              if [[ -d "$search_path" ]]; then
+                echo "  📦 Processing packages from: $search_path"
+                
+                # Copy packages efficiently
+                find "$search_path" -name "*.ipk" -o -name "*.apk" | while read -r package; do
+                  if [[ -f "$package" ]]; then
+                    cp "$package" "$target_dir/"
+                    ((total_processed++))
+                  fi
+                done
+                
+                # Copy metadata
+                [[ -f "$search_path/README.md" ]] && cp "$search_path/README.md" "$target_dir/"
+                [[ -f "$search_path/Packages" ]] && cp "$search_path/Packages" "$target_dir/"
+                
+                break
+              fi
+            done
+            
+            # Verify processing
+            processed_count=$(find "$target_dir" -name "*.ipk" -o -name "*.apk" 2>/dev/null | wc -l)
+            echo "  ✅ Processed $processed_count packages for $arch/$branch"
           done
           
-          if [[ "$download_success" == "false" ]]; then
-            echo "::warning::No package artifacts found"
-            echo "success=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          
           echo "::endgroup::"
-          
-          total_packages=$(find ./temp-artifacts -name "*.ipk" -o -name "*.apk" 2>/dev/null | wc -l)
-          echo "📊 Downloaded $success_count artifacts with $total_packages total packages"
-          
-          echo "success=true" >> $GITHUB_OUTPUT
-          echo "total_packages=$total_packages" >> $GITHUB_OUTPUT
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "📊 Total packages processed: $total_processed"
 
       - name: 🔄 Process and organize packages
         if: steps.download.outputs.success == 'true'
