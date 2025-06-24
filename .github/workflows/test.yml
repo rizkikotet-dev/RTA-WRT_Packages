@@ -79,6 +79,12 @@ jobs:
             exit 1
           fi
           
+          echo "🔍 Debug: Listing artifact structure..."
+          find ./temp-artifacts -type d | head -20
+          echo ""
+          find ./temp-artifacts -name "*.ipk" -o -name "*.apk" | head -10
+          echo ""
+          
           total_packages=$(find ./temp-artifacts -name "*.ipk" -o -name "*.apk" 2>/dev/null | wc -l)
           echo "📊 Found $total_packages total packages"
           
@@ -98,76 +104,129 @@ jobs:
         run: |
           echo "::group::🔄 Processing artifacts"
           
+          # Debug: List all artifacts first
+          echo "🔍 Available artifacts:"
+          find ./temp-artifacts -type d -name "*packages*" || true
+          find ./temp-artifacts -type f -name "*.ipk" -o -name "*.apk" | head -10 || true
+          
           mkdir -p packages
           total_processed=0
+          processed_dirs=0
           
-          # Process each artifact directory
-          for artifact_dir in ./temp-artifacts/packages_* ./temp-artifacts/*/packages_*; do
-            # Check if directory exists and is not a glob pattern
-            if [ ! -d "$artifact_dir" ]; then
+          # First, try to find packages in any directory structure
+          echo "🔍 Searching for package files..."
+          all_packages=$(find ./temp-artifacts -name "*.ipk" -o -name "*.apk" 2>/dev/null)
+          
+          if [ -z "$all_packages" ]; then
+            echo "❌ No .ipk or .apk files found in artifacts"
+            echo "::endgroup::"
+            exit 1
+          fi
+          
+          # Group packages by directory and try to parse structure
+          echo "$all_packages" | while IFS= read -r package_file; do
+            if [ ! -f "$package_file" ]; then
               continue
             fi
             
-            artifact_name=$(basename "$artifact_dir")
-            echo "📁 Processing: $artifact_name"
+            # Extract directory info from path
+            package_dir=$(dirname "$package_file")
+            relative_path=${package_dir#./temp-artifacts/}
             
-            # Parse artifact metadata with better error handling
-            if [[ "$artifact_name" =~ ^packages_(.+)-(.+)$ ]]; then
-              arch="${BASH_REMATCH[1]}"
-              branch="${BASH_REMATCH[2]}"
-            else
-              echo "::warning::Could not parse artifact name: $artifact_name"
-              # Try to extract from directory structure
-              arch=$(echo "$artifact_name" | sed 's/packages_//' | sed 's/-[^-]*$//')
-              branch=$(echo "$artifact_name" | sed 's/.*-//')
+            echo "📄 Found package: $package_file"
+            echo "  📁 In directory: $relative_path"
+            
+            # Try multiple parsing strategies
+            arch=""
+            branch=""
+            
+            # Strategy 1: Parse from directory name like packages_arch-branch
+            if echo "$relative_path" | grep -q "packages_"; then
+              dir_name=$(echo "$relative_path" | grep -o "packages_[^/]*" | head -1)
+              if [ -n "$dir_name" ]; then
+                metadata=${dir_name#packages_}
+                # Split by last dash to get arch and branch
+                arch=$(echo "$metadata" | sed 's/-[^-]*$//')
+                branch=$(echo "$metadata" | sed 's/.*-//')
+              fi
             fi
             
-            echo "  🏗️ Architecture: $arch"
-            echo "  🌿 Branch: $branch"
+            # Strategy 2: Parse from path like arch/branch or branch/arch
+            if [ -z "$arch" ] || [ -z "$branch" ]; then
+              path_parts=$(echo "$relative_path" | tr '/' '\n' | grep -v "^$")
+              # Look for common OpenWRT architectures and branches
+              for part in $path_parts; do
+                case "$part" in
+                  "aarch64_cortex-a53"|"aarch64_cortex-a72"|"aarch64_generic"|"arm_cortex-a15_neon-vfpv4"|"arm_cortex-a7_neon-vfpv4"|"arm_cortex-a9"|"mips_24kc"|"mipsel_24kc"|"x86_64"|"i386")
+                    arch="$part"
+                    ;;
+                  "23.05"|"24.10"|"SNAPSHOT"|"snapshot"|"openwrt-23.05"|"openwrt-24.10")
+                    case "$part" in
+                      "openwrt-"*) branch=${part#openwrt-} ;;
+                      "snapshot") branch="SNAPSHOT" ;;
+                      *) branch="$part" ;;
+                    esac
+                    ;;
+                esac
+              done
+            fi
+            
+            # Strategy 3: Default values if parsing fails
+            if [ -z "$arch" ]; then
+              arch=$(echo "$relative_path" | tr '/' '\n' | tail -2 | head -1)
+              [ -z "$arch" ] && arch="unknown"
+            fi
+            if [ -z "$branch" ]; then
+              branch=$(echo "$relative_path" | tr '/' '\n' | tail -1)
+              [ -z "$branch" ] && branch="SNAPSHOT"
+            fi
+            
+            echo "  🏗️ Detected Architecture: $arch"
+            echo "  🌿 Detected Branch: $branch"
             
             # Create target structure
             target_dir="packages/$branch/$arch"
             mkdir -p "$target_dir"
             
-            # Find and process packages with multiple search paths
-            package_found=false
-            for search_path in \
-              "$artifact_dir/releases/$branch/$arch" \
-              "$artifact_dir/$branch/$arch" \
-              "$artifact_dir/packages/$branch/$arch" \
-              "$artifact_dir"; do
-              
-              if [ -d "$search_path" ]; then
-                echo "  📦 Processing packages from: $search_path"
-                
-                # Copy packages efficiently
-                find "$search_path" -maxdepth 1 -name "*.ipk" -o -name "*.apk" 2>/dev/null | while read -r package; do
-                  if [ -f "$package" ]; then
-                    cp "$package" "$target_dir/"
-                    total_processed=$((total_processed + 1))
-                    package_found=true
-                  fi
-                done
-                
-                # Copy metadata files if they exist
-                [ -f "$search_path/README.md" ] && cp "$search_path/README.md" "$target_dir/"
-                [ -f "$search_path/Packages" ] && cp "$search_path/Packages" "$target_dir/"
-                [ -f "$search_path/Packages.gz" ] && cp "$search_path/Packages.gz" "$target_dir/"
-                
-                if [ "$package_found" = true ]; then
-                  break
-                fi
-              fi
-            done
-            
-            # Verify processing
-            processed_count=$(find "$target_dir" -name "*.ipk" -o -name "*.apk" 2>/dev/null | wc -l)
-            echo "  ✅ Processed $processed_count packages for $arch/$branch"
-            total_processed=$((total_processed + processed_count))
+            # Copy package
+            package_name=$(basename "$package_file")
+            if cp "$package_file" "$target_dir/"; then
+              echo "  ✅ Copied: $package_name"
+              total_processed=$((total_processed + 1))
+            else
+              echo "  ❌ Failed to copy: $package_name"
+            fi
           done
           
+          # Also copy any metadata files found
+          echo "🔍 Looking for metadata files..."
+          find ./temp-artifacts -name "Packages" -o -name "Packages.gz" -o -name "README.md" 2>/dev/null | while IFS= read -r meta_file; do
+            if [ -f "$meta_file" ]; then
+              meta_dir=$(dirname "$meta_file")
+              relative_path=${meta_dir#./temp-artifacts/}
+              echo "📋 Found metadata: $meta_file"
+              
+              # Try to match with package directories
+              for branch_dir in packages/*; do
+                if [ -d "$branch_dir" ]; then
+                  for arch_dir in "$branch_dir"/*; do
+                    if [ -d "$arch_dir" ]; then
+                      cp "$meta_file" "$arch_dir/" 2>/dev/null || true
+                    fi
+                  done
+                fi
+              done
+            fi
+          done
+          
+          # Final count
+          final_count=$(find packages -name "*.ipk" -o -name "*.apk" 2>/dev/null | wc -l)
+          
           echo "::endgroup::"
-          echo "📊 Total packages processed: $total_processed"
+          echo "📊 Total packages processed: $final_count"
+          
+          # Update the environment for next steps
+          echo "PROCESSED_PACKAGES=$final_count" >> $GITHUB_ENV
 
       - name: 🧹 Intelligent repository cleanup
         run: |
@@ -515,7 +574,7 @@ jobs:
           fi
           
           # Process packages by architecture with progress
-          total_packages=$(find packages -name "*.ipk" -o -name "*.apk" 2>/dev/null | wc -l)
+          total_packages=${PROCESSED_PACKAGES:-$(find packages -name "*.ipk" -o -name "*.apk" 2>/dev/null | wc -l)}
           
           if [ $total_packages -gt 0 ]; then
             echo "📤 Committing $total_packages packages..."
