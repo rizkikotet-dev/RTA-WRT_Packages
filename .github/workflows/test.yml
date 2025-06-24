@@ -11,226 +11,24 @@ on:
       - 'packages/**'
   workflow_dispatch:
     inputs:
-      package:
-        description: 'Optional: Name of the single package to build (e.g., my-package)'
-        required: false
+      runs_id:
+        description: 'Run ID to build packages'
+        required: true
         type: string
 
 env:
   FORCE_UNSAFE_CONFIGURE: 1
 
 jobs:
-  build:
-    name: Build ${{ matrix.openwrt.version }} ${{ matrix.target.arch }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        openwrt:
-          - version: "24.10.1"
-            branch: "24.10"
-            pkg_ext: "ipk"
-            base_url: "https://downloads.openwrt.org/releases/24.10.1/targets"
-          - version: "23.05.5"
-            branch: "23.05"
-            pkg_ext: "ipk"
-            base_url: "https://downloads.openwrt.org/releases/23.05.5/targets"
-          - version: "SNAPSHOT"
-            branch: "SNAPSHOT"
-            pkg_ext: "apk"
-            base_url: "https://downloads.openwrt.org/snapshots/targets"
-        target:
-          - arch: x86_64
-            target_system: "x86/64"
-            target_name: "x86-64"
-            sdk_suffix_snapshots: "_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
-            sdk_suffix_24_10: "_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
-            sdk_suffix_23_05: "_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
-          - arch: aarch64_generic
-            target_system: "armsr/armv8"
-            target_name: "armsr-armv8"
-            sdk_suffix_snapshots: "_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
-            sdk_suffix_24_10: "_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
-            sdk_suffix_23_05: "_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
-          - arch: aarch64_cortex-a53
-            target_system: "mediatek/filogic"
-            target_name: "mediatek-filogic"
-            sdk_suffix_snapshots: "_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
-            sdk_suffix_24_10: "_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
-            sdk_suffix_23_05: "_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
-          - arch: aarch64_cortex-a72
-            target_system: "bcm27xx/bcm2711"
-            target_name: "bcm27xx-bcm2711"
-            sdk_suffix_snapshots: "_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
-            sdk_suffix_24_10: "_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
-            sdk_suffix_23_05: "_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
-          - arch: aarch64_cortex-a76
-            target_system: "rockchip/armv8"
-            target_name: "rockchip-armv8"
-            sdk_suffix_snapshots: "_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
-            sdk_suffix_24_10: "_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
-            sdk_suffix_23_05: "_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
-
-    steps:
-    - name: 🔄 Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
-    - name: 🗑️ Free up disk space
-      run: |
-        sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
-        echo "✅ Disk space freed"
-
-    - name: 🛠️ Setup build environment
-      run: |
-        sudo apt-get update -qq
-        sudo apt-get install -y -qq build-essential ecj fastjar file g++ gawk gettext git java-propose-classpath libelf-dev libncurses5-dev libncursesw5-dev libssl-dev python3 python3-setuptools python3-dev rsync subversion swig time unzip wget xsltproc zlib1g-dev zstd libtool libtool-bin autoconf automake pkg-config
-        echo "✅ Build environment ready"
-
-    - name: 🌐 Generate SDK URL and filename
-      run: |
-        if [ "${{ matrix.openwrt.version }}" = "SNAPSHOT" ]; then
-          SDK_URL="${{ matrix.openwrt.base_url }}/${{ matrix.target.target_system }}/openwrt-sdk-${{ matrix.target.target_name }}${{ matrix.target.sdk_suffix_snapshots }}"
-          SDK_FILENAME="openwrt-sdk.tar.zst"
-        elif [ "${{ matrix.openwrt.version }}" = "24.10.1" ]; then
-          SDK_URL="${{ matrix.openwrt.base_url }}/${{ matrix.target.target_system }}/openwrt-sdk-${{ matrix.openwrt.version }}-${{ matrix.target.target_name }}${{ matrix.target.sdk_suffix_24_10 }}"
-          SDK_FILENAME="openwrt-sdk.tar.zst"
-        elif [ "${{ matrix.openwrt.version }}" = "23.05.5" ]; then
-          SDK_URL="${{ matrix.openwrt.base_url }}/${{ matrix.target.target_system }}/openwrt-sdk-${{ matrix.openwrt.version }}-${{ matrix.target.target_name }}${{ matrix.target.sdk_suffix_23_05 }}"
-          SDK_FILENAME="openwrt-sdk.tar.xz"
-        else
-          echo "❌ Unsupported OpenWrt version: ${{ matrix.openwrt.version }}"
-          exit 1
-        fi
-        echo "SDK_URL=$SDK_URL" >> $GITHUB_ENV
-        echo "SDK_FILENAME=$SDK_FILENAME" >> $GITHUB_ENV
-        echo "✅ SDK URL generated"
-
-    - name: 📥 Download and extract OpenWrt SDK
-      run: |
-        echo "📥 Downloading SDK..."
-        for i in {1..5}; do
-          if wget --tries=3 --retry-connrefused -q "$SDK_URL" -O "$SDK_FILENAME"; then
-            file_size=$(stat -c%s "$SDK_FILENAME")
-            [ "$file_size" -lt 10000000 ] && { echo "❌ File too small ($file_size bytes)"; exit 1; }
-            if [[ "$SDK_FILENAME" == *.tar.zst ]]; then
-              tar --zstd -xf "$SDK_FILENAME"
-            elif [[ "$SDK_FILENAME" == *.tar.xz ]]; then
-              tar -xf "$SDK_FILENAME"
-            fi
-            SDK_DIR=$(find . -maxdepth 1 -type d -name "openwrt-sdk-*" | head -1)
-            [ -z "$SDK_DIR" ] && { echo "❌ SDK directory not found"; ls -la; exit 1; }
-            echo "SDK_PATH=$(pwd)/$SDK_DIR" >> $GITHUB_ENV
-            rm -f "$SDK_FILENAME"
-            echo "✅ SDK downloaded and extracted"
-            exit 0
-          fi
-          echo "🔄 Retry $i/5 failed"
-          sleep 10
-        done
-        echo "❌ Download failed after 5 attempts"
-        curl -I "$SDK_URL" || true
-        exit 1
-
-    - name: 📋 Prepare SDK feeds
-      run: |
-        cd "$SDK_PATH"
-        echo "src-link custom $(pwd)/../packages" >> feeds.conf.default
-        ./scripts/feeds update -a >/dev/null 2>&1
-        ./scripts/feeds install -a >/dev/null 2>&1
-        echo "✅ Feeds prepared"
-
-    - name: 📦 Get package list
-      id: packages
-      run: |
-        if [ -n "${{ github.event.inputs.package }}" ]; then
-          PACKAGE="${{ github.event.inputs.package }}"
-          if [ -d "./packages/$PACKAGE" ] && [ -f "./packages/$PACKAGE/Makefile" ]; then
-            echo "🔍 Building single package: $PACKAGE"
-            PACKAGES="$PACKAGE"
-          else
-            echo "❌ Specified package '$PACKAGE' not found in packages/ directory"
-            exit 1
-          fi
-        else
-          echo "📦 Building all packages"
-          PACKAGES=""
-          for pkg in ./packages/*/; do
-            [ -f "$pkg/Makefile" ] && PACKAGES="$PACKAGES $(basename "$pkg")"
-          done
-          PACKAGES=$(echo "$PACKAGES" | sed 's/^ *//')
-        fi
-        echo "packages=$PACKAGES" >> $GITHUB_OUTPUT
-        [ -z "$PACKAGES" ] && { echo "❌ No packages found"; exit 1; }
-        echo "✅ Package list retrieved"
-
-    - name: ⚙️ Configure SDK
-      run: |
-        cd "$SDK_PATH"
-        make defconfig >/dev/null 2>&1
-        echo "✅ SDK configured"
-
-    - name: 🔨 Build packages
-      run: |
-        cd "$SDK_PATH"
-        FAILED_PACKAGES=""
-        BUILT_PACKAGES=""
-        for pkg in ${{ steps.packages.outputs.packages }}; do
-          echo "🔨 Building $pkg..."
-          make package/$pkg/clean V=s >/dev/null 2>&1 || true
-          if timeout 30m make package/$pkg/compile V=s J=1 >/dev/null 2>&1; then
-            echo "✅ $pkg built"
-            BUILT_PACKAGES="$BUILT_PACKAGES $pkg"
-          else
-            echo "❌ $pkg failed"
-            FAILED_PACKAGES="$FAILED_PACKAGES $pkg"
-            echo "📜 Error details:"
-            [ -f "logs/package/compile/$pkg.txt" ] && tail -50 "logs/package/compile/$pkg.txt" || echo "No log available"
-          fi
-        done
-        BUILT_PACKAGES=$(echo "$BUILT_PACKAGES" | sed 's/^ *//')
-        FAILED_PACKAGES=$(echo "$FAILED_PACKAGES" | sed 's/^ *//')
-        echo "BUILT_PACKAGES=$BUILT_PACKAGES" >> $GITHUB_ENV
-        echo "FAILED_PACKAGES=$FAILED_PACKAGES" >> $GITHUB_ENV
-        echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-        echo "- Version: ${{ matrix.openwrt.version }}" >> $GITHUB_STEP_SUMMARY
-        echo "- Arch: ${{ matrix.target.arch }}" >> $GITHUB_STEP_SUMMARY
-        echo "- Format: .${{ matrix.openwrt.pkg_ext }}" >> $GITHUB_STEP_SUMMARY
-        [ -n "$BUILT_PACKAGES" ] && echo "- ✅ Built: $BUILT_PACKAGES" >> $GITHUB_STEP_SUMMARY
-        [ -n "$FAILED_PACKAGES" ] && echo "- ❌ Failed: $FAILED_PACKAGES" >> $GITHUB_STEP_SUMMARY
-
-    - name: 📂 Collect built packages
-      run: |
-        cd "$SDK_PATH"
-        mkdir -p "../artifacts/${{ matrix.openwrt.branch }}/${{ matrix.target.arch }}"
-        if [ -n "$BUILT_PACKAGES" ]; then
-          find bin/packages -name "*.${{ matrix.openwrt.pkg_ext }}" -type f | while read pkg_file; do
-            package_name=$(basename "$pkg_file" | sed 's/_.*$//')
-            echo " $BUILT_PACKAGES " | grep -q " $package_name " && cp "$pkg_file" "../artifacts/${{ matrix.openwrt.branch }}/${{ matrix.target.arch }}/"
-          done
-          find bin/targets -name "*.${{ matrix.openwrt.pkg_ext }}" -type f 2>/dev/null | xargs -I {} cp {} "../artifacts/${{ matrix.openwrt.branch }}/${{ matrix.target.arch }}/" || true
-        fi
-        ls "../artifacts/${{ matrix.openwrt.branch }}/${{ matrix.target.arch }}/"*.${{ matrix.openwrt.pkg_ext }} >/dev/null 2>&1 && echo "✅ Packages collected" || echo "⚠️ No packages collected"
-
-    - name: ⬆️ Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: packages-${{ matrix.openwrt.branch }}-${{ matrix.target.arch }}
-        path: artifacts/${{ matrix.openwrt.branch }}/${{ matrix.target.arch }}/*.${{ matrix.openwrt.pkg_ext }}
-
   release:
     name: 🚀 Release & Deploy Packages
-    needs: build
     runs-on: ubuntu-latest
-    if: always() && needs.prepare.outputs.should_build == 'true'
 
     steps:
       - name: 🎯 Release initialization
         run: |
           echo "::notice title=Release Started::🚀 Starting package release process"
           echo "### 🚀 Release Pipeline" >> $GITHUB_STEP_SUMMARY
-          echo "- **Total jobs**: ${{ needs.prepare.outputs.total_jobs }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
 
       - name: 📥 Checkout releases branch
@@ -239,14 +37,12 @@ jobs:
           ref: releases
           fetch-depth: 1
           token: ${{ secrets.GITHUB_TOKEN }}
-          lfs: true
 
       - name: 🔧 Setup release environment
         run: |
           # Install dependencies
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends git-lfs jq zstd pv
-
           # Configure Git
           git lfs install --local
           git config user.email "actions@github.com"
@@ -289,7 +85,7 @@ jobs:
           total_packages=0
           
           # Get all artifacts from the current run
-          artifacts=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts --jq '.artifacts[].name' | grep '^packages-' || true)
+          artifacts=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.input.runs_id }}/artifacts --jq '.artifacts[].name' | grep '^packages_' || true)
           
           if [[ -z "$artifacts" ]]; then
             echo "::warning::No package artifacts found"
@@ -331,14 +127,14 @@ jobs:
           mkdir -p packages
           total_processed=0
           
-          for artifact_dir in ./temp-artifacts/packages-*; do
+          for artifact_dir in ./temp-artifacts/packages_*; do
             [[ -d "$artifact_dir" ]] || continue
             
             artifact_name=$(basename "$artifact_dir")
             echo "📁 Processing: $artifact_name"
             
             # Parse artifact metadata
-            metadata=${artifact_name#packages-}
+            metadata=${artifact_name#packages_}
             arch=${metadata%-*}
             branch=${metadata##*-}
             
@@ -579,7 +375,6 @@ jobs:
           opkg update
           opkg list | grep custom_packages
           ```
-
           ## 🛡️ Quality Assurance
           
           - ✅ **Automated Testing**: All packages undergo validation
@@ -682,7 +477,6 @@ jobs:
           
           echo "::endgroup::"
           echo "✅ Generated enhanced repository metadata"
-
       - name: 🚀 Smart commit and deployment
         run: |
           echo "::group::🚀 Deploying changes"
@@ -826,7 +620,7 @@ jobs:
   cleanup:
     name: 🧹 Cleanup & Maintenance
     runs-on: ubuntu-latest
-    needs: [build, release]
+    needs: release
     if: always()
     
     steps:
@@ -836,7 +630,6 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Build | ${{ needs.build.result == 'success' && '✅ Success' || needs.build.result == 'failure' && '❌ Failed' || '⏭️ Skipped' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Release | ${{ needs.release.result == 'success' && '✅ Success' || needs.release.result == 'failure' && '❌ Failed' || '⏭️ Skipped' }} |" >> $GITHUB_STEP_SUMMARY
 
       - name: 🔔 Notification on failure

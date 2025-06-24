@@ -37,7 +37,7 @@ env:
   SOURCE_REPO: rizkikotet-dev/RTA-WRT_Packages
   MAX_REPO_SIZE_GB: 2
   BATCH_SIZE: 100
-  CACHE_VERSION: v2
+  CACHE_VERSION: v3
   NODE_VERSION: '20'
 
 concurrency:
@@ -145,7 +145,6 @@ jobs:
     
     strategy:
       fail-fast: false
-      max-parallel: 6
       matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
 
     steps:
@@ -163,17 +162,6 @@ jobs:
           fetch-depth: 0
           lfs: true
 
-      - name: 💾 Cache OpenWRT SDK
-        uses: actions/cache@v4
-        with:
-          path: |
-            openwrt-sdk-*
-            dl/
-          key: openwrt-sdk-${{ matrix.arch }}-${{ matrix.branch }}-${{ env.CACHE_VERSION }}
-          restore-keys: |
-            openwrt-sdk-${{ matrix.arch }}-${{ matrix.branch }}-
-            openwrt-sdk-${{ matrix.arch }}-
-
       - name: 🔧 Setup build environment
         run: |
           echo "::group::Installing dependencies"
@@ -190,6 +178,38 @@ jobs:
           echo "Memory: $(free -h | head -2)"
           echo "Disk space: $(df -h | head -2)"
           echo "::endgroup::"
+
+      - name: 📦 Create cache directories
+        run: |
+          # Create cache directories before caching step
+          mkdir -p openwrt-sdk-cache
+          mkdir -p dl-cache
+          echo "Cache directories created"
+
+      - name: 💾 Cache OpenWRT SDK and Downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            openwrt-sdk-cache/
+            dl-cache/
+          key: openwrt-sdk-${{ matrix.arch }}-${{ matrix.branch }}-${{ env.CACHE_VERSION }}-${{ hashFiles('packages/**/*.mk', 'packages/**/Makefile') }}
+          restore-keys: |
+            openwrt-sdk-${{ matrix.arch }}-${{ matrix.branch }}-${{ env.CACHE_VERSION }}-
+            openwrt-sdk-${{ matrix.arch }}-${{ matrix.branch }}-
+            openwrt-sdk-${{ matrix.arch }}-
+
+      - name: 🔄 Restore SDK from cache
+        run: |
+          if [[ -d "openwrt-sdk-cache" ]] && [[ "$(ls -A openwrt-sdk-cache)" ]]; then
+            echo "📦 Restoring SDK from cache"
+            cp -r openwrt-sdk-cache/* . 2>/dev/null || true
+          fi
+          
+          if [[ -d "dl-cache" ]] && [[ "$(ls -A dl-cache)" ]]; then
+            echo "📦 Restoring downloads from cache"
+            mkdir -p dl/
+            cp -r dl-cache/* dl/ 2>/dev/null || true
+          fi
 
       - name: 📦 Validate package existence
         if: github.event.inputs.package != ''
@@ -226,6 +246,24 @@ jobs:
           INDEX: 1
           NO_REFRESH_CHECK: true
           IGNORE_ERRORS: true
+
+      - name: 💾 Update cache after build
+        run: |
+          echo "🔄 Updating cache with build artifacts"
+          
+          # Cache the SDK directory (if it exists)
+          if [[ -d "openwrt-sdk-*" ]]; then
+            rm -rf openwrt-sdk-cache/*
+            cp -r openwrt-sdk-* openwrt-sdk-cache/ 2>/dev/null || true
+            echo "SDK cached"
+          fi
+          
+          # Cache downloads directory
+          if [[ -d "dl" ]] && [[ "$(ls -A dl)" ]]; then
+            rm -rf dl-cache/*
+            cp -r dl/* dl-cache/ 2>/dev/null || true
+            echo "Downloads cached"
+          fi
 
       - name: 🔍 Validate build artifacts
         id: validate
@@ -357,7 +395,6 @@ jobs:
           ref: releases
           fetch-depth: 1
           token: ${{ secrets.GITHUB_TOKEN }}
-          lfs: true
 
       - name: 🔧 Setup release environment
         run: |
@@ -529,6 +566,7 @@ jobs:
           fi
           
           echo "::endgroup::"
+
       - name: 📊 Generate advanced repository metadata
         id: generate_metadata
         run: |
