@@ -100,7 +100,7 @@ jobs:
           echo "$artifacts" | while read -r artifact_name; do
             if [[ -n "$artifact_name" ]]; then
               echo "⬇️ Downloading: $artifact_name"
-              if gh run download ${{ github.run_id }} --name "$artifact_name" --dir "./temp-artifacts/$artifact_name"; then
+              if gh run download ${{ github.event.inputs.runs_id }} --name "$artifact_name" --dir "./temp-artifacts/$artifact_name"; then
                 ((success_count++))
                 echo "✅ Downloaded: $artifact_name"
               else
@@ -244,7 +244,7 @@ jobs:
               "branches": $(find packages -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort | jq -R . | jq -s .),
               "architectures": $(find packages -mindepth 2 -maxdepth 2 -type d -exec dirname {} \; | xargs -n1 basename | sort -u | jq -R . | jq -s .),
               "build_info": {
-                "workflow_run_id": "${{ github.run_id }}",
+                "workflow_run_id": "${{ github.event.inputs.runs_id }}",
                 "commit_sha": "${{ github.sha }}",
                 "trigger": "${{ github.event_name }}",
                 "source_repository": "$SOURCE_REPO"
@@ -495,7 +495,7 @@ jobs:
             git commit -m "📝 Update repository metadata" \
                       -m "🕐 Updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" \
                       -m "📦 Packages: $(find packages -name '*.ipk' -o -name '*.apk' | wc -l)" \
-                      -m "🏗️ Build: ${{ github.run_id }}" \
+                      -m "🏗️ Build: ${{ github.event.inputs.runs_id }}" \
                       -m "🌿 Source: $SOURCE_REPO"
           fi
           
@@ -534,7 +534,7 @@ jobs:
                                   -m "🏗️ Architecture: $arch" \
                                   -m "🌿 Branch: $branch" \
                                   -m "📊 Count: $arch_packages packages" \
-                                  -m "🔧 Build: ${{ github.run_id }}"
+                                  -m "🔧 Build: ${{ github.event.inputs.runs_id }}"
                       fi
                       
                       processed=$((processed + arch_packages))
@@ -606,7 +606,7 @@ jobs:
           ### 🔗 Quick Links
           - 📦 [Browse Packages](../../tree/releases/packages)
           - 📋 [Repository Metadata](../../blob/releases/packages/repository.json)
-          - 🏃 [View Workflow](../../actions/runs/${{ github.run_id }})
+          - 🏃 [View Workflow](../../actions/runs/${{ github.event.inputs.runs_id }})
           
           ### 🚀 What's Next?
           1. Packages are now available in the \`releases\` branch
