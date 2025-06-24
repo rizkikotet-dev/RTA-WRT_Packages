@@ -1,23 +1,22 @@
-name: Build OpenWrt Packages
+name: Release & Deploy OpenWRT Packages
 
 on:
-  push:
-    branches: [ main, master ]
-    paths:
-      - 'packages/**'
-  pull_request:
-    branches: [ main, master ]
-    paths:
-      - 'packages/**'
   workflow_dispatch:
     inputs:
       runs_id:
         description: 'Run ID to build packages'
         required: true
         type: string
+      force_cleanup:
+        description: 'Force repository cleanup'
+        required: false
+        type: boolean
+        default: false
 
 env:
   FORCE_UNSAFE_CONFIGURE: 1
+  MAX_REPO_SIZE_GB: 5
+  SOURCE_REPO: ${{ github.repository }}
 
 jobs:
   release:
@@ -30,6 +29,7 @@ jobs:
           echo "::notice title=Release Started::🚀 Starting package release process"
           echo "### 🚀 Release Pipeline" >> $GITHUB_STEP_SUMMARY
           echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run ID**: ${{ github.event.inputs.runs_id }}" >> $GITHUB_STEP_SUMMARY
 
       - name: 📥 Checkout releases branch
         uses: actions/checkout@v4
@@ -37,41 +37,30 @@ jobs:
           ref: releases
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-          lfs: false
 
       - name: 🔧 Setup release environment
         run: |
           # Install dependencies
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends git-lfs jq zstd pv
+          sudo apt-get install -y --no-install-recommends jq zstd pv curl
+          
           # Configure Git
-          git lfs install --local
           git config user.email "actions@github.com"
           git config user.name "🤖 OpenWRT Package Bot"
           git config pull.rebase true
           git config core.compression 9
           git config pack.compression 9
-          git config lfs.concurrenttransfers 8
-
-      # - name: 📋 Setup LFS tracking
-      #   run: |
-      #     cat > .gitattributes <<'EOF'
-      #     # Package files
-      #     *.ipk filter=lfs diff=lfs merge=lfs -text
-      #     *.apk filter=lfs diff=lfs merge=lfs -text
-      #     *.tar.* filter=lfs diff=lfs merge=lfs -text
-      #     *.gz filter=lfs diff=lfs merge=lfs -text
           
-      #     # Generated content
-      #     packages/** linguist-generated=true
-      #     releases/** linguist-generated=true
-          
-      #     # Documentation
-      #     *.md text eol=lf
-      #     *.json text eol=lf
-      #     EOF
-          
-      #     git add .gitattributes
+          # Create .gitattributes for better handling of binary files
+          cat > .gitattributes <<EOF
+          *.ipk binary
+          *.apk binary
+          *.tar.gz binary
+          *.tar.xz binary
+          Packages text
+          README.md text
+          *.json text
+          EOF
 
       - name: ⬇️ Download artifacts
         uses: actions/download-artifact@v4
@@ -81,17 +70,28 @@ jobs:
           merge-multiple: true
           path: ./temp-artifacts
 
-      - name: 📦 process artifacts
+      - name: 📦 Process artifacts
         id: download
         run: |
-          total_packages=$(find ./temp-artifacts -name "*.ipk" -o -name "*.apk" | wc -l)
-          echo "📊 $total_packages total packages"
+          if [ ! -d "./temp-artifacts" ]; then
+            echo "::error::No artifacts directory found"
+            echo "success=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          total_packages=$(find ./temp-artifacts -name "*.ipk" -o -name "*.apk" 2>/dev/null | wc -l)
+          echo "📊 Found $total_packages total packages"
+          
+          if [ $total_packages -eq 0 ]; then
+            echo "::warning::No packages found in artifacts"
+            echo "success=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
           
           echo "success=true" >> $GITHUB_OUTPUT
           echo "total_packages=$total_packages" >> $GITHUB_OUTPUT
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
 
       - name: 🔄 Process and organize packages
         if: steps.download.outputs.success == 'true'
@@ -101,16 +101,26 @@ jobs:
           mkdir -p packages
           total_processed=0
           
-          for artifact_dir in ./temp-artifacts/packages_*; do
-            [[ -d "$artifact_dir" ]] || continue
+          # Process each artifact directory
+          for artifact_dir in ./temp-artifacts/packages_* ./temp-artifacts/*/packages_*; do
+            # Check if directory exists and is not a glob pattern
+            if [ ! -d "$artifact_dir" ]; then
+              continue
+            fi
             
             artifact_name=$(basename "$artifact_dir")
             echo "📁 Processing: $artifact_name"
             
-            # Parse artifact metadata
-            metadata=${artifact_name#packages_}
-            arch=${metadata%-*}
-            branch=${metadata##*-}
+            # Parse artifact metadata with better error handling
+            if [[ "$artifact_name" =~ ^packages_(.+)-(.+)$ ]]; then
+              arch="${BASH_REMATCH[1]}"
+              branch="${BASH_REMATCH[2]}"
+            else
+              echo "::warning::Could not parse artifact name: $artifact_name"
+              # Try to extract from directory structure
+              arch=$(echo "$artifact_name" | sed 's/packages_//' | sed 's/-[^-]*$//')
+              branch=$(echo "$artifact_name" | sed 's/.*-//')
+            fi
             
             echo "  🏗️ Architecture: $arch"
             echo "  🌿 Branch: $branch"
@@ -119,33 +129,41 @@ jobs:
             target_dir="packages/$branch/$arch"
             mkdir -p "$target_dir"
             
-            # Find and process packages
+            # Find and process packages with multiple search paths
+            package_found=false
             for search_path in \
               "$artifact_dir/releases/$branch/$arch" \
+              "$artifact_dir/$branch/$arch" \
+              "$artifact_dir/packages/$branch/$arch" \
               "$artifact_dir"; do
               
-              if [[ -d "$search_path" ]]; then
+              if [ -d "$search_path" ]; then
                 echo "  📦 Processing packages from: $search_path"
                 
                 # Copy packages efficiently
-                find "$search_path" -name "*.ipk" -o -name "*.apk" | while read -r package; do
-                  if [[ -f "$package" ]]; then
+                find "$search_path" -maxdepth 1 -name "*.ipk" -o -name "*.apk" 2>/dev/null | while read -r package; do
+                  if [ -f "$package" ]; then
                     cp "$package" "$target_dir/"
-                    ((total_processed++))
+                    total_processed=$((total_processed + 1))
+                    package_found=true
                   fi
                 done
                 
-                # Copy metadata
-                [[ -f "$search_path/README.md" ]] && cp "$search_path/README.md" "$target_dir/"
-                [[ -f "$search_path/Packages" ]] && cp "$search_path/Packages" "$target_dir/"
+                # Copy metadata files if they exist
+                [ -f "$search_path/README.md" ] && cp "$search_path/README.md" "$target_dir/"
+                [ -f "$search_path/Packages" ] && cp "$search_path/Packages" "$target_dir/"
+                [ -f "$search_path/Packages.gz" ] && cp "$search_path/Packages.gz" "$target_dir/"
                 
-                break
+                if [ "$package_found" = true ]; then
+                  break
+                fi
               fi
             done
             
             # Verify processing
-            processed_count=$(find "$target_dir" -name "*.ipk" -o -name "*.apk" | wc -l)
+            processed_count=$(find "$target_dir" -name "*.ipk" -o -name "*.apk" 2>/dev/null | wc -l)
             echo "  ✅ Processed $processed_count packages for $arch/$branch"
+            total_processed=$((total_processed + processed_count))
           done
           
           echo "::endgroup::"
@@ -155,29 +173,43 @@ jobs:
         run: |
           echo "::group::🧹 Repository maintenance"
           
-          current_size_gb=$(du -sb . | awk '{print int($1/1024/1024/1024)}')
+          if [ ! -d "packages" ]; then
+            echo "📂 No packages directory found, skipping cleanup"
+            echo "::endgroup::"
+            exit 0
+          fi
+          
+          current_size_gb=$(du -sb packages 2>/dev/null | awk '{print int($1/1024/1024/1024)}' || echo "0")
           echo "📏 Current repository size: ${current_size_gb}GB"
           
-          if [[ $current_size_gb -gt $MAX_REPO_SIZE_GB ]] || [[ "${{ github.event.inputs.force_cleanup }}" == "true" ]]; then
+          if [ $current_size_gb -gt $MAX_REPO_SIZE_GB ] || [ "${{ github.event.inputs.force_cleanup }}" = "true" ]; then
             echo "🧹 Cleanup required (size: ${current_size_gb}GB, limit: ${MAX_REPO_SIZE_GB}GB)"
             
-            # Strategy 1: Remove duplicate packages (keep latest)
+            # Strategy 1: Remove duplicate packages (keep latest by version)
             echo "  🔄 Deduplicating packages..."
-            find packages -name "*.ipk" -o -name "*.apk" | \
-              sed 's/_[^_]*\.(ipk|apk)$//' | sort | uniq -d | \
-              while read -r base_name; do
-                find packages -name "${base_name}_*" | sort -V | head -n -1 | xargs rm -f
+            find packages -name "*.ipk" -o -name "*.apk" 2>/dev/null | while read -r pkg; do
+              base_name=$(basename "$pkg" | sed 's/_[^_]*\.\(ipk\|apk\)$//')
+              pkg_dir=$(dirname "$pkg")
+              
+              # Find all versions of this package in the same directory
+              find "$pkg_dir" -name "${base_name}_*" 2>/dev/null | sort -V | head -n -1 | while read -r old_pkg; do
+                [ -f "$old_pkg" ] && rm -f "$old_pkg"
               done
+            done
             
             # Strategy 2: Remove oldest snapshots first
-            echo "  🗑️ Removing old snapshots..."
-            find packages/SNAPSHOT -name "*.ipk" -o -name "*.apk" | \
-              head -n -$((MAX_REPO_SIZE_GB * 200)) | xargs rm -f 2>/dev/null || true
+            if [ -d "packages/SNAPSHOT" ]; then
+              echo "  🗑️ Removing old snapshots..."
+              find packages/SNAPSHOT -name "*.ipk" -o -name "*.apk" 2>/dev/null | \
+                sort | head -n -$((MAX_REPO_SIZE_GB * 200)) | while read -r old_pkg; do
+                [ -f "$old_pkg" ] && rm -f "$old_pkg"
+              done
+            fi
             
             # Strategy 3: Clean empty directories
             find packages -type d -empty -delete 2>/dev/null || true
             
-            new_size_gb=$(du -sb . | awk '{print int($1/1024/1024/1024)}')
+            new_size_gb=$(du -sb packages 2>/dev/null | awk '{print int($1/1024/1024/1024)}' || echo "0")
             echo "  📉 Size after cleanup: ${new_size_gb}GB"
           fi
           
@@ -192,7 +224,7 @@ jobs:
           total_packages=$(find packages -name "*.ipk" -o -name "*.apk" 2>/dev/null | wc -l)
           total_branches=$(find packages -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
           total_archs=$(find packages -mindepth 2 -maxdepth 2 -type d 2>/dev/null | wc -l)
-          repo_size_mb=$(du -sm packages 2>/dev/null | cut -f1)
+          repo_size_mb=$(du -sm packages 2>/dev/null | cut -f1 || echo "0")
           
           # Store metadata for later use
           echo "total_packages=$total_packages" >> $GITHUB_OUTPUT
@@ -201,6 +233,7 @@ jobs:
           echo "repo_size_mb=$repo_size_mb" >> $GITHUB_OUTPUT
           
           # Create comprehensive repository metadata
+          mkdir -p packages
           cat > packages/repository.json <<EOF
           {
             "repository": {
@@ -215,8 +248,8 @@ jobs:
                 "repository_size_mb": $repo_size_mb,
                 "last_build_packages": ${{ steps.download.outputs.total_packages || 0 }}
               },
-              "branches": $(find packages -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort | jq -R . | jq -s .),
-              "architectures": $(find packages -mindepth 2 -maxdepth 2 -type d -exec dirname {} \; | xargs -n1 basename | sort -u | jq -R . | jq -s .),
+              "branches": $(find packages -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | sort | jq -R . | jq -s . || echo "[]"),
+              "architectures": $(find packages -mindepth 2 -maxdepth 2 -type d -exec dirname {} \; 2>/dev/null | xargs -n1 basename | sort -u | jq -R . | jq -s . || echo "[]"),
               "build_info": {
                 "workflow_run_id": "${{ github.event.inputs.runs_id }}",
                 "commit_sha": "${{ github.sha }}",
@@ -282,53 +315,58 @@ jobs:
             echo "## 🌿 Supported OpenWRT Versions"
             echo ""
             
-            for branch_dir in packages/*; do
-              if [[ -d "$branch_dir" ]]; then
-                branch_name=$(basename "$branch_dir")
-                branch_packages=$(find "$branch_dir" -name "*.ipk" -o -name "*.apk" | wc -l)
-                branch_archs=$(find "$branch_dir" -mindepth 1 -maxdepth 1 -type d | wc -l)
-                
-                # Branch status badge
-                if [[ "$branch_name" == "SNAPSHOT" ]]; then
-                  badge="![SNAPSHOT](https://img.shields.io/badge/SNAPSHOT-Development-red?style=flat-square)"
-                else
-                  badge="![Stable](https://img.shields.io/badge/$branch_name-Stable-green?style=flat-square)"
-                fi
-                
-                echo "### $badge"
-                echo ""
-                echo "| Architecture | Packages | Status |"
-                echo "|--------------|----------|--------|"
-                
-                for arch_dir in "$branch_dir"/*; do
-                  if [[ -d "$arch_dir" ]]; then
-                    arch_name=$(basename "$arch_dir")
-                    arch_packages=$(find "$arch_dir" -name "*.ipk" -o -name "*.apk" | wc -l)
-                    if [[ $arch_packages -gt 0 ]]; then
-                      echo "| \`$arch_name\` | $arch_packages | ✅ Available |"
-                    fi
+            if [ -d "packages" ]; then
+              for branch_dir in packages/*; do
+                if [ -d "$branch_dir" ]; then
+                  branch_name=$(basename "$branch_dir")
+                  branch_packages=$(find "$branch_dir" -name "*.ipk" -o -name "*.apk" 2>/dev/null | wc -l)
+                  branch_archs=$(find "$branch_dir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+                  
+                  # Branch status badge
+                  if [ "$branch_name" = "SNAPSHOT" ]; then
+                    badge="![SNAPSHOT](https://img.shields.io/badge/SNAPSHOT-Development-red?style=flat-square)"
+                  else
+                    badge="![Stable](https://img.shields.io/badge/$branch_name-Stable-green?style=flat-square)"
                   fi
-                done
-                echo ""
-              fi
-            done
+                  
+                  echo "### $badge"
+                  echo ""
+                  echo "| Architecture | Packages | Status |"
+                  echo "|--------------|----------|--------|"
+                  
+                  for arch_dir in "$branch_dir"/*; do
+                    if [ -d "$arch_dir" ]; then
+                      arch_name=$(basename "$arch_dir")
+                      arch_packages=$(find "$arch_dir" -name "*.ipk" -o -name "*.apk" 2>/dev/null | wc -l)
+                      if [ $arch_packages -gt 0 ]; then
+                        echo "| \`$arch_name\` | $arch_packages | ✅ Available |"
+                      fi
+                    fi
+                  done
+                  echo ""
+                fi
+              done
+            else
+              echo "No packages available yet."
+              echo ""
+            fi
             
-            # Usage section
-            cat <<'USAGE'
+            # Usage section with corrected repository name
+            cat <<USAGE
           ## 🚀 Quick Start
           
           ### Method 1: Add Repository Source
           
-          ```bash
+          \`\`\`bash
           # Add custom repository (replace [BRANCH] and [ARCH] with your values)
-          echo "src/gz custom_packages https://raw.githubusercontent.com/rizkikotet-dev/RTA-WRT_Packages/releases/packages/[BRANCH]/[ARCH]" >> /etc/opkg/customfeeds.conf
+          echo "src/gz custom_packages https://raw.githubusercontent.com/${{ github.repository }}/releases/packages/[BRANCH]/[ARCH]" >> /etc/opkg/customfeeds.conf
           
           # Update package lists
           opkg update
           
           # Install packages
           opkg install [package_name]
-          ```
+          \`\`\`
           
           ### Method 2: Direct Download
           
@@ -336,19 +374,20 @@ jobs:
           
           ### Method 3: Batch Installation Script
           
-          ```bash
+          \`\`\`bash
           #!/bin/bash
           # Auto-detect architecture and install packages
-          ARCH=$(opkg print-architecture | awk 'NR==2{print $2}')
+          ARCH=\$(opkg print-architecture | awk 'NR==2{print \$2}')
           BRANCH="23.05"  # or 24.10, SNAPSHOT
           
           # Add repository
-          echo "src/gz custom_packages https://raw.githubusercontent.com/rizkikotet-dev/RTA-WRT_Packages/releases/packages/$BRANCH/$ARCH" > /etc/opkg/customfeeds.conf
+          echo "src/gz custom_packages https://raw.githubusercontent.com/${{ github.repository }}/releases/packages/\$BRANCH/\$ARCH" > /etc/opkg/customfeeds.conf
           
           # Update and install
           opkg update
           opkg list | grep custom_packages
-          ```
+          \`\`\`
+          
           ## 🛡️ Quality Assurance
           
           - ✅ **Automated Testing**: All packages undergo validation
@@ -361,18 +400,18 @@ jobs:
           Want to add your packages? Here's how:
           
           1. **Fork** this repository
-          2. **Add** your packages to the `packages/` directory
+          2. **Add** your packages to the \`packages/\` directory
           3. **Test** locally with OpenWRT SDK
           4. **Submit** a pull request
           
           ### Package Structure
-          ```
+          \`\`\`
           packages/
           ├── your-package/
           │   ├── Makefile
           │   ├── files/
           │   └── patches/
-          ```
+          \`\`\`
           
           ## 🐛 Troubleshooting
           
@@ -380,25 +419,25 @@ jobs:
           <summary>❓ <strong>Common Issues & Solutions</strong></summary>
           
           ### Package Installation Fails
-          ```bash
+          \`\`\`bash
           # Clear opkg cache and retry
           rm -rf /tmp/opkg-lists/*
           opkg update
           opkg install [package_name]
-          ```
+          \`\`\`
           
           ### Architecture Mismatch
-          ```bash
+          \`\`\`bash
           # Check your device architecture
           opkg print-architecture
           # Use the correct architecture in repository URL
-          ```
+          \`\`\`
           
           ### Repository Not Found
-          ```bash
+          \`\`\`bash
           # Verify repository URL is correct
           cat /etc/opkg/customfeeds.conf
-          ```
+          \`\`\`
           
           </details>
           
@@ -406,13 +445,13 @@ jobs:
           
           <div align="center">
             <a href="../../actions">
-              <img src="https://img.shields.io/github/actions/workflow/status/rizkikotet-dev/RTA-WRT_Packages/build.yml?branch=main&style=for-the-badge&logo=github-actions" alt="Build Status">
+              <img src="https://img.shields.io/github/actions/workflow/status/${{ github.repository }}/build.yml?branch=main&style=for-the-badge&logo=github-actions" alt="Build Status">
             </a>
             <a href="../../releases">
-              <img src="https://img.shields.io/github/v/release/rizkikotet-dev/RTA-WRT_Packages?style=for-the-badge&logo=github" alt="Latest Release">
+              <img src="https://img.shields.io/github/v/release/${{ github.repository }}?style=for-the-badge&logo=github" alt="Latest Release">
             </a>
             <a href="../../commits/main">
-              <img src="https://img.shields.io/github/last-commit/rizkikotet-dev/RTA-WRT_Packages?style=for-the-badge&logo=git" alt="Last Commit">
+              <img src="https://img.shields.io/github/last-commit/${{ github.repository }}?style=for-the-badge&logo=git" alt="Last Commit">
             </a>
           </div>
           
@@ -444,13 +483,14 @@ jobs:
           </div>
           
           <div align="center">
-            <sub>Built with ❤️ using GitHub Actions • Powered by OpenWRT | RizkiKotet</sub>
+            <sub>Built with ❤️ using GitHub Actions • Powered by OpenWRT</sub>
           </div>
           USAGE
           } > README.md
           
           echo "::endgroup::"
           echo "✅ Generated enhanced repository metadata"
+
       - name: 🚀 Smart commit and deployment
         run: |
           echo "::group::🚀 Deploying changes"
@@ -458,50 +498,49 @@ jobs:
           # Check for changes
           if git diff --quiet && git diff --cached --quiet; then
             echo "ℹ️ No changes to commit"
+            echo "::endgroup::"
             exit 0
           fi
           
-          # Stage metadata files
-          git add .gitattributes packages/repository.json README.md
+          # Stage metadata files first
+          git add .gitattributes packages/repository.json README.md 2>/dev/null || true
           
           # Commit metadata first
           if ! git diff --cached --quiet; then
             git commit -m "📝 Update repository metadata" \
                       -m "🕐 Updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" \
-                      -m "📦 Packages: $(find packages -name '*.ipk' -o -name '*.apk' | wc -l)" \
+                      -m "📦 Packages: $(find packages -name '*.ipk' -o -name '*.apk' 2>/dev/null | wc -l)" \
                       -m "🏗️ Build: ${{ github.event.inputs.runs_id }}" \
                       -m "🌿 Source: $SOURCE_REPO"
           fi
           
           # Process packages by architecture with progress
-          total_packages=$(find packages -name "*.ipk" -o -name "*.apk" | wc -l)
+          total_packages=$(find packages -name "*.ipk" -o -name "*.apk" 2>/dev/null | wc -l)
           
-          if [[ $total_packages -gt 0 ]]; then
+          if [ $total_packages -gt 0 ]; then
             echo "📤 Committing $total_packages packages..."
-            
-            # Track LFS files
-            git lfs track "*.ipk" "*.apk"
-            git add .gitattributes
             
             # Smart batching by architecture
             processed=0
             for branch_dir in packages/*; do
-              if [[ -d "$branch_dir" ]]; then
+              if [ -d "$branch_dir" ]; then
                 branch=$(basename "$branch_dir")
                 
                 for arch_dir in "$branch_dir"/*; do
-                  if [[ -d "$arch_dir" ]]; then
+                  if [ -d "$arch_dir" ]; then
                     arch=$(basename "$arch_dir")
-                    arch_packages=$(find "$arch_dir" -name "*.ipk" -o -name "*.apk" | wc -l)
+                    arch_packages=$(find "$arch_dir" -name "*.ipk" -o -name "*.apk" 2>/dev/null | wc -l)
                     
-                    if [[ $arch_packages -gt 0 ]]; then
+                    if [ $arch_packages -gt 0 ]; then
                       echo "  📦 Committing $arch_packages packages for $branch/$arch"
                       
                       # Progress indicator
-                      progress=$((processed * 100 / total_packages))
-                      echo "::notice::Progress: $progress% ($processed/$total_packages packages)"
+                      if [ $total_packages -gt 0 ]; then
+                        progress=$((processed * 100 / total_packages))
+                        echo "::notice::Progress: $progress% ($processed/$total_packages packages)"
+                      fi
                       
-                      git add "$arch_dir"
+                      git add "$arch_dir" 2>/dev/null || true
                       
                       if ! git diff --cached --quiet; then
                         git commit -m "📦 Add $branch/$arch packages" \
@@ -520,7 +559,9 @@ jobs:
           fi
           
           echo "::endgroup::"
-          
+
+      - name: 🌐 Push to GitHub
+        run: |
           echo "::group::🌐 Pushing to GitHub"
           
           # Enhanced push with retry and conflict resolution
@@ -537,7 +578,7 @@ jobs:
             else
               echo "⚠️ Push attempt $attempt failed"
               
-              if [[ $attempt -eq $max_retries ]]; then
+              if [ $attempt -eq $max_retries ]; then
                 echo "❌ All push attempts failed"
                 exit 1
               fi
@@ -547,11 +588,14 @@ jobs:
               
               # Attempt conflict resolution
               echo "🔄 Attempting to resolve conflicts..."
-              git pull --rebase origin releases || {
-                echo "❌ Failed to resolve conflicts"
-                git rebase --abort
-                git pull --strategy-option=theirs origin releases
-              }
+              if ! git pull --rebase origin releases; then
+                echo "❌ Failed to resolve conflicts with rebase, trying merge"
+                git rebase --abort 2>/dev/null || true
+                if ! git pull --strategy-option=theirs origin releases; then
+                  echo "❌ Failed to resolve conflicts with merge"
+                  continue
+                fi
+              fi
               
               # Exponential backoff
               retry_delay=$((retry_delay * 2))
@@ -565,8 +609,8 @@ jobs:
       - name: 🎉 Generate success summary
         if: success()
         run: |
-          total_packages=$(find packages -name "*.ipk" -o -name "*.apk" | wc -l)
-          repo_size=$(du -sh packages | cut -f1)
+          total_packages=$(find packages -name "*.ipk" -o -name "*.apk" 2>/dev/null | wc -l)
+          repo_size=$(du -sh packages 2>/dev/null | cut -f1 || echo "0B")
           
           cat >> $GITHUB_STEP_SUMMARY <<EOF
           ## 🎉 Release Completed Successfully!
@@ -574,13 +618,13 @@ jobs:
           ### 📊 Final Statistics
           - **Total Packages**: $total_packages
           - **Repository Size**: $repo_size
-          - **Build Duration**: ${{ job.duration || 'N/A' }}
+          - **Build Source**: Run ID ${{ github.event.inputs.runs_id }}
           - **Commit SHA**: \`${{ github.sha }}\`
           
           ### 🔗 Quick Links
           - 📦 [Browse Packages](../../tree/releases/packages)
           - 📋 [Repository Metadata](../../blob/releases/packages/repository.json)
-          - 🏃 [View Workflow](../../actions/runs/${{ github.event.inputs.runs_id }})
+          - 🏃 [View Workflow](../../actions/runs/${{ github.run_id }})
           
           ### 🚀 What's Next?
           1. Packages are now available in the \`releases\` branch
@@ -604,10 +648,27 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Release | ${{ needs.release.result == 'success' && '✅ Success' || needs.release.result == 'failure' && '❌ Failed' || '⏭️ Skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          
+          case "${{ needs.release.result }}" in
+            "success")
+              status="✅ Success"
+              ;;
+            "failure")
+              status="❌ Failed"
+              ;;
+            "cancelled")
+              status="🚫 Cancelled"
+              ;;
+            *)
+              status="⏭️ Skipped"
+              ;;
+          esac
+          
+          echo "| Release | $status |" >> $GITHUB_STEP_SUMMARY
 
       - name: 🔔 Notification on failure
-        if: failure()
+        if: failure() || needs.release.result == 'failure'
         run: |
-          echo "::error title=Workflow Failed::❌ The OpenWRT package build workflow has failed"
+          echo "::error title=Workflow Failed::❌ The OpenWRT package release workflow has failed"
           echo "Please check the logs and fix any issues before the next scheduled run."
+          echo "::notice::Check the workflow logs for detailed error information."
