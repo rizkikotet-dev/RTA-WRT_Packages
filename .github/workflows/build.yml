@@ -6,7 +6,7 @@ on:
       force_cleanup:
         description: '🧹 Force repository cleanup'
         required: false
-        default: 'true'
+        default: true
         type: boolean
       build_target:
         description: '🎯 Build target'
@@ -30,6 +30,8 @@ on:
         description: '📦 Optional: Name of the single package to build (e.g., my-package)'
         required: false
         type: string
+  schedule:
+    - cron: '0 2 * * 0'  # Weekly build on Sunday at 2 AM UTC
 
 env:
   SOURCE_REPO: rizkikotet-dev/RTA-WRT_Packages
@@ -72,11 +74,14 @@ jobs:
         id: matrix
         run: |
           set -euo pipefail
-          set -x
-          custom_arch="${{ github.event.inputs.custom_arch }}"
-          custom_branch="${{ github.event.inputs.custom_branch }}"
-          echo "custom_arch=$custom_arch"
-          echo "custom_branch=$custom_branch"
+          
+          custom_arch="${{ github.event.inputs.custom_arch || '' }}"
+          custom_branch="${{ github.event.inputs.custom_branch || '' }}"
+          build_target="${{ github.event.inputs.build_target || 'all' }}"
+          
+          echo "Build target: $build_target"
+          echo "Custom arch: $custom_arch"
+          echo "Custom branch: $custom_branch"
 
           # Define architectures
           declare -a archs=(
@@ -88,7 +93,7 @@ jobs:
           )
           
           # Define branches based on build target
-          case "${{ github.event.inputs.build_target || 'all' }}" in
+          case "$build_target" in
             "stable-only")
               declare -a branches=("openwrt-23.05" "openwrt-24.10")
               ;;
@@ -120,24 +125,23 @@ jobs:
               fi
               matrix_json+="{\"arch\":\"$arch\",\"branch\":\"$branch\",\"stable\":$([ "$branch" != "SNAPSHOT" ] && echo "true" || echo "false")}"
               total_jobs=$((total_jobs + 1))
-              echo "total_jobs after increment: $total_jobs"
             done
           done
           
           matrix_json+=']}'
-          echo "Writing outputs"
+          
           echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
           echo "total_jobs=$total_jobs" >> $GITHUB_OUTPUT
           
           echo "🎯 Generated matrix for $total_jobs jobs"
-          echo "$matrix_json" | jq .
+          echo "$matrix_json" | jq '.'
 
   build:
     name: 🏗️ Build ${{ matrix.arch }} • ${{ matrix.branch }}
     runs-on: ubuntu-latest
     needs: prepare
     if: needs.prepare.outputs.should_build == 'true'
-    continue-on-error: ${{ !matrix.stable }}
+    continue-on-error: true
     
     strategy:
       fail-fast: false
@@ -178,7 +182,7 @@ jobs:
             build-essential libncurses5-dev zlib1g-dev gawk git \
             gettext libssl-dev xsltproc wget unzip python3 rsync \
             file python3-minimal libpython3-stdlib \
-            ca-certificates curl jq
+            ca-certificates curl jq zstd
           echo "::endgroup::"
           
           echo "::group::System information"
@@ -198,7 +202,8 @@ jobs:
             exit 1
           fi
 
-      - name: 🏗️ Build packages with OpenWRT SDK
+      - name: 🏗️ Build packages with OpenWRT SDK (with input)
+        if: ${{ github.event.inputs.package != '' }}
         uses: openwrt/gh-action-sdk@main
         env:
           ARCH: ${{ matrix.arch }}
@@ -208,7 +213,19 @@ jobs:
           INDEX: 1
           NO_REFRESH_CHECK: true
           IGNORE_ERRORS: true
-          PACKAGES: ${{ github.event.inputs.package != '' }}
+          PACKAGES: ${{ github.event.inputs.package }}
+
+      - name: 🏗️ Build packages with OpenWRT SDK (no input)
+        if: ${{ github.event.inputs.package == '' }}
+        uses: openwrt/gh-action-sdk@main
+        env:
+          ARCH: ${{ matrix.arch }}
+          BRANCH: ${{ matrix.branch }}
+          FEEDNAME: custom_packages
+          FEED_DIR: ./packages/
+          INDEX: 1
+          NO_REFRESH_CHECK: true
+          IGNORE_ERRORS: true
 
       - name: 🔍 Validate build artifacts
         id: validate
