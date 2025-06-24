@@ -123,6 +123,7 @@ jobs:
       - name: ⬇️ Download artifacts
         uses: actions/download-artifact@v4
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ github.event.inputs.runs_id }}
           merge-multiple: true
           path: ./temp-artifacts
