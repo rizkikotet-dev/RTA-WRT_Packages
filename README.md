@@ -24,23 +24,51 @@
   </tr>
   <tr>
     <td align="center">
-    <img src="https://img.shields.io/badge/0-packages-blue?style=flat-square" alt="0 packages">
+    <img src="https://img.shields.io/badge/4350-packages-blue?style=flat-square" alt="4350 packages">
   </td>
   <td align="center">
-    <img src="https://img.shields.io/badge/0-architectures-green?style=flat-square" alt="0 architectures">
+    <img src="https://img.shields.io/badge/15-architectures-green?style=flat-square" alt="15 architectures">
   </td>
   <td align="center">
-    <img src="https://img.shields.io/badge/0-branches-orange?style=flat-square" alt="0 branches">
+    <img src="https://img.shields.io/badge/3-branches-orange?style=flat-square" alt="3 branches">
   </td>
   <td align="center">
-    <img src="https://img.shields.io/badge/1MB-size-red?style=flat-square" alt="1MB">
+    <img src="https://img.shields.io/badge/356MB-size-red?style=flat-square" alt="356MB">
   </td>
 </tr>
 </table>
 
-> 🕐 **Last updated**: 2025-06-24 17:44:19 UTC
+> 🕐 **Last updated**: 2025-06-24 17:59:06 UTC
 
 ## 🌿 Supported OpenWRT Versions
+
+### ![Stable](https://img.shields.io/badge/23.05-Stable-green?style=flat-square)
+
+| Architecture | Packages | Status |
+|--------------|----------|--------|
+| `aarch64_cortex-a53` | 336 | ✅ Available |
+| `aarch64_cortex-a72` | 336 | ✅ Available |
+| `aarch64_generic` | 336 | ✅ Available |
+| `openwrt-23.05` | 336 | ✅ Available |
+| `x86_64` | 331 | ✅ Available |
+
+### ![Stable](https://img.shields.io/badge/24.10-Stable-green?style=flat-square)
+
+| Architecture | Packages | Status |
+|--------------|----------|--------|
+| `aarch64_cortex-a53` | 336 | ✅ Available |
+| `aarch64_cortex-a72` | 336 | ✅ Available |
+| `aarch64_generic` | 336 | ✅ Available |
+| `openwrt-24.10` | 336 | ✅ Available |
+| `x86_64` | 331 | ✅ Available |
+
+### ![SNAPSHOT](https://img.shields.io/badge/SNAPSHOT-Development-red?style=flat-square)
+
+| Architecture | Packages | Status |
+|--------------|----------|--------|
+| `aarch64_cortex-a72` | 333 | ✅ Available |
+| `aarch64_generic` | 336 | ✅ Available |
+| `x86_64` | 331 | ✅ Available |
 
 ## 🚀 Quick Start
 
