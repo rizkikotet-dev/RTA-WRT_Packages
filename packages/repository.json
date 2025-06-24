@@ -3,12 +3,12 @@
     "name": "🚀 OpenWRT Custom Packages",
     "description": "Pre-built OpenWRT packages for multiple architectures and versions",
     "version": "2.0.0",
-    "updated": "2025-06-24T17:59:06Z",
+    "updated": "2025-06-24T18:13:04Z",
     "statistics": {
-      "total_packages": 4350,
+      "total_packages": 5022,
       "total_branches": 3,
-      "total_architectures": 15,
-      "repository_size_mb": 356,
+      "total_architectures": 16,
+      "repository_size_mb": 409,
       "last_build_packages": 5025
     },
     "branches": [
@@ -23,7 +23,7 @@
 ],
     "build_info": {
       "workflow_run_id": "15845594974",
-      "commit_sha": "4cc6849b08c80f38c4d2408f12269f02d15ce8bf",
+      "commit_sha": "80c726efb830ea4ceff7e7d28e3ec5d121eccf49",
       "trigger": "workflow_dispatch",
       "source_repository": "rizkikotet-dev/RTA-WRT_Packages"
     },
