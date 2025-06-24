@@ -73,53 +73,6 @@ jobs:
           
       #     git add .gitattributes
 
-      # - name: 📦 Download and process artifacts
-      #   id: download
-      #   run: |
-      #     echo "::group::📥 Downloading artifacts"
-          
-      #     # Create temporary directory
-      #     mkdir -p ./temp-artifacts
-          
-      #     # Download all artifacts
-      #     success_count=0
-      #     total_packages=0
-          
-      #     # Get all artifacts from the current run
-      #     artifacts=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.event.inputs.runs_id }}/artifacts --jq '.artifacts[].name' | grep '^packages_' || true)
-          
-      #     if [[ -z "$artifacts" ]]; then
-      #       echo "::warning::No package artifacts found"
-      #       echo "success=false" >> $GITHUB_OUTPUT
-      #       exit 0
-      #     fi
-          
-      #     echo "Found artifacts:"
-      #     echo "$artifacts"
-          
-      #     # Download with progress tracking
-      #     echo "$artifacts" | while read -r artifact_name; do
-      #       if [[ -n "$artifact_name" ]]; then
-      #         echo "⬇️ Downloading: $artifact_name"
-      #         if gh run download ${{ github.event.inputs.runs_id }} --name "$artifact_name" --dir "./temp-artifacts/$artifact_name"; then
-      #           ((success_count++))
-      #           echo "✅ Downloaded: $artifact_name"
-      #         else
-      #           echo "❌ Failed to download: $artifact_name"
-      #         fi
-      #       fi
-      #     done
-          
-      #     echo "::endgroup::"
-          
-      #     total_packages=$(find ./temp-artifacts -name "*.ipk" -o -name "*.apk" | wc -l)
-      #     echo "📊 Downloaded $success_count artifacts with $total_packages total packages"
-          
-      #     echo "success=true" >> $GITHUB_OUTPUT
-      #     echo "total_packages=$total_packages" >> $GITHUB_OUTPUT
-      #   env:
-      #     GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: ⬇️ Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -127,6 +80,17 @@ jobs:
           run-id: ${{ github.event.inputs.runs_id }}
           merge-multiple: true
           path: ./temp-artifacts
+
+      - name: 📦 process artifacts
+        id: download
+        run: |
+          total_packages=$(find ./temp-artifacts -name "*.ipk" -o -name "*.apk" | wc -l)
+          echo "📊 $total_packages total packages"
+          
+          echo "success=true" >> $GITHUB_OUTPUT
+          echo "total_packages=$total_packages" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 
       - name: 🔄 Process and organize packages
