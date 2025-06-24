@@ -38,7 +38,7 @@
 </tr>
 </table>
 
-> 🕐 **Last updated**: 2025-06-23 20:21:03 UTC
+> 🕐 **Last updated**: 2025-06-24 04:39:56 UTC
 
 ## 🌿 Supported OpenWRT Versions
 
