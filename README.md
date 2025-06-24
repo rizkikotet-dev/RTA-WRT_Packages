@@ -24,21 +24,21 @@
   </tr>
   <tr>
     <td align="center">
-    <img src="https://img.shields.io/badge/5022-packages-blue?style=flat-square" alt="5022 packages">
+    <img src="https://img.shields.io/badge/4350-packages-blue?style=flat-square" alt="4350 packages">
   </td>
   <td align="center">
-    <img src="https://img.shields.io/badge/16-architectures-green?style=flat-square" alt="16 architectures">
+    <img src="https://img.shields.io/badge/13-architectures-green?style=flat-square" alt="13 architectures">
   </td>
   <td align="center">
     <img src="https://img.shields.io/badge/3-branches-orange?style=flat-square" alt="3 branches">
   </td>
   <td align="center">
-    <img src="https://img.shields.io/badge/409MB-size-red?style=flat-square" alt="409MB">
+    <img src="https://img.shields.io/badge/355MB-size-red?style=flat-square" alt="355MB">
   </td>
 </tr>
 </table>
 
-> 🕐 **Last updated**: 2025-06-24 18:13:04 UTC
+> 🕐 **Last updated**: 2025-06-24 18:33:37 UTC
 
 ## 🌿 Supported OpenWRT Versions
 
@@ -48,7 +48,6 @@
 |--------------|----------|--------|
 | `aarch64_cortex-a53` | 336 | ✅ Available |
 | `aarch64_cortex-a72` | 336 | ✅ Available |
-| `aarch64_cortex-a76` | 336 | ✅ Available |
 | `aarch64_generic` | 336 | ✅ Available |
 | `openwrt-23.05` | 336 | ✅ Available |
 | `x86_64` | 331 | ✅ Available |
@@ -59,7 +58,6 @@
 |--------------|----------|--------|
 | `aarch64_cortex-a53` | 336 | ✅ Available |
 | `aarch64_cortex-a72` | 336 | ✅ Available |
-| `aarch64_cortex-a76` | 336 | ✅ Available |
 | `aarch64_generic` | 336 | ✅ Available |
 | `openwrt-24.10` | 336 | ✅ Available |
 | `x86_64` | 331 | ✅ Available |
@@ -68,7 +66,7 @@
 
 | Architecture | Packages | Status |
 |--------------|----------|--------|
-| `aarch64_cortex-a76` | 333 | ✅ Available |
+| `aarch64_cortex-a72` | 333 | ✅ Available |
 | `aarch64_generic` | 336 | ✅ Available |
 | `x86_64` | 331 | ✅ Available |
 
@@ -91,7 +89,7 @@ opkg install [package_name]
 
 Browse packages directly at: [📂 Package Browser](../../tree/releases/packages)
 
-### Method 3: Auto-detect Architecture
+### Method 3: Batch Installation Script
 
 ```bash
 #!/bin/bash
@@ -107,13 +105,99 @@ opkg update
 opkg list | grep custom_packages
 ```
 
-## 📞 Support
+## 🛡️ Quality Assurance
 
-- 🐛 **Bug Reports**: [Create an Issue](../../issues/new)
-- 💡 **Feature Requests**: [Request Feature](../../issues/new)
-- 📧 **Questions**: [Discussions](../../discussions)
+- ✅ **Automated Testing**: All packages undergo validation
+- 🔄 **Weekly Builds**: Fresh packages every week
+- 📊 **Build Monitoring**: Failed builds are tracked and fixed
+- 🏷️ **Version Tracking**: Clear versioning and changelog
+
+## 🤝 Contributing
+
+Want to add your packages? Here's how:
+
+1. **Fork** this repository
+2. **Add** your packages to the `packages/` directory
+3. **Test** locally with OpenWRT SDK
+4. **Submit** a pull request
+
+### Package Structure
+```
+packages/
+├── your-package/
+│   ├── Makefile
+│   ├── files/
+│   └── patches/
+```
+
+## 🐛 Troubleshooting
+
+<details>
+<summary>❓ <strong>Common Issues & Solutions</strong></summary>
+
+### Package Installation Fails
+```bash
+# Clear opkg cache and retry
+rm -rf /tmp/opkg-lists/*
+opkg update
+opkg install [package_name]
+```
+
+### Architecture Mismatch
+```bash
+# Check your device architecture
+opkg print-architecture
+# Use the correct architecture in repository URL
+```
+
+### Repository Not Found
+```bash
+# Verify repository URL is correct
+cat /etc/opkg/customfeeds.conf
+```
+
+</details>
+
+## 📈 Build Status & Monitoring
+
+<div align="center">
+  <a href="../../actions">
+    <img src="https://img.shields.io/github/actions/workflow/status/rizkikotet-dev/RTA-WRT_Packages/build.yml?branch=main&style=for-the-badge&logo=github-actions" alt="Build Status">
+  </a>
+  <a href="../../releases">
+    <img src="https://img.shields.io/github/v/release/rizkikotet-dev/RTA-WRT_Packages?style=for-the-badge&logo=github" alt="Latest Release">
+  </a>
+  <a href="../../commits/main">
+    <img src="https://img.shields.io/github/last-commit/rizkikotet-dev/RTA-WRT_Packages?style=for-the-badge&logo=git" alt="Last Commit">
+  </a>
+</div>
+
+## 📞 Support & Community
+
+- 🐛 **Bug Reports**: [Create an Issue](../../issues/new?template=bug_report.md)
+- 💡 **Feature Requests**: [Request Feature](../../issues/new?template=feature_request.md)
+- 💬 **Discussions**: [Join Discussion](../../discussions)
+- 📧 **Contact**: [Email Support](mailto:support@example.com)
+
+## 📄 License & Legal
+
+This repository contains packages from various sources. Each package maintains its original license.
+
+- 📜 **Repository License**: MIT
+- ⚖️ **Package Licenses**: Varies (see individual packages)
+- 🔒 **Privacy Policy**: No personal data collected
 
 ---
+
+<div align="center">
+  <h3>🌟 Star this repository if it helps you!</h3>
+  <p>
+    <a href="../../stargazers">⭐ Star</a> •
+    <a href="../../network/members">🍴 Fork</a> •
+    <a href="../../issues">🐛 Report Bug</a> •
+    <a href="../../discussions">💬 Discuss</a>
+  </p>
+</div>
 
 <div align="center">
   <sub>Built with ❤️ using GitHub Actions • Powered by OpenWRT</sub>
